@@ -13,6 +13,7 @@ import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
 import Data.ByteString.Char8 (pack)
 import Data.Data
+import Data.Maybe
 
 -- | In theory could use the definition from WAI, but:
 --
@@ -79,3 +80,18 @@ parseRoutes = QuasiQuoter x y where
     y yaml = do
         resources <- qRunIO $ fa $ decode (pack yaml) >>= resourcesFromSO
         dataToPatQ (const Nothing) resources
+
+dataTypeDec :: String -> [Resource] -> Q Dec
+dataTypeDec name res = return $ DataD [] (mkName name) [] (map go res) claz
+  where
+    go (Resource n pieces _) = NormalC (mkName n) $ mapMaybe go' pieces
+    go' (StringPiece _) = Just (NotStrict, ConT $ mkName "String")
+    go' (IntPiece _) = Just (NotStrict, ConT $ mkName "Integer")
+    go' (SlurpPiece _) = Just (NotStrict, AppT ListT $ ConT $ mkName "String")
+    go' _ = Nothing
+    claz = [mkName "Show", mkName "Read"]
+
+createRoutes :: String -> [Resource] -> Q [Dec]
+createRoutes name res = do
+    dt <- dataTypeDec name res
+    return [dt]
