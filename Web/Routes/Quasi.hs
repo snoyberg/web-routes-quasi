@@ -1,12 +1,18 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 module Web.Routes.Quasi
     where
 
 import Data.Object.String
+import Data.Object.Yaml
 import Data.Attempt
 import Control.Monad
 import qualified Safe.Failure as SF
 import Data.Char
 import Control.Arrow
+import Language.Haskell.TH.Syntax
+import Language.Haskell.TH.Quote
+import Data.ByteString.Char8 (pack)
+import Data.Data
 
 -- | In theory could use the definition from WAI, but:
 --
@@ -14,21 +20,21 @@ import Control.Arrow
 --
 -- * we want to constrain this to only certain methods
 data Method = GET | PUT | POST | DELETE
-    deriving (Read, Show, Eq)
+    deriving (Read, Show, Eq, Data, Typeable)
 
 data Resource = Resource String [Piece] Handler
-    deriving (Read, Show, Eq)
+    deriving (Read, Show, Eq, Data, Typeable)
 
 data Handler = ByMethod [(Method, String)]
              | Single String
              | SubSite String String
-    deriving (Read, Show, Eq)
+    deriving (Read, Show, Eq, Data, Typeable)
 
 data Piece = StaticPiece String
            | StringPiece String
            | IntPiece String
            | SlurpPiece String
-    deriving (Read, Show, Eq)
+    deriving (Read, Show, Eq, Data, Typeable)
 
 resourcesFromSO :: StringObject -> Attempt [Resource]
 resourcesFromSO = mapM go <=< fromMapping where
@@ -64,3 +70,12 @@ pieceFromString ('$':x) = StringPiece x
 pieceFromString ('#':x) = IntPiece x
 pieceFromString ('*':x) = SlurpPiece x
 pieceFromString x = StaticPiece x
+
+parseRoutes :: QuasiQuoter
+parseRoutes = QuasiQuoter x y where
+    x yaml = do
+        resources <- qRunIO $ fa $ decode (pack yaml) >>= resourcesFromSO
+        dataToExpQ (const Nothing) resources
+    y yaml = do
+        resources <- qRunIO $ fa $ decode (pack yaml) >>= resourcesFromSO
+        dataToPatQ (const Nothing) resources
