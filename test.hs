@@ -2,38 +2,21 @@
 {-# LANGUAGE TemplateHaskell #-}
 import Web.Routes.Quasi
 
+resources :: [Resource]
 resources = [$parseRoutes|
-/:
-  name: Home
-  methods: [GET]
-/user/#userid:
-  name: User
-  methods: [GET, PUT, DELETE]
-/static:
-  name: Static
-  subsite: StaticRoutes
-  dispatch: staticRoutes
-/foo/*slurp:
-  name: Foo
-/bar/$barparam:
-  name: Bar
+/                    Home       GET
+/user/#userid        User       GET PUT DELETE
+/static              Static     StaticRoutes staticRoutes
+/foo/*slurp          Foo
+/bar/$barparam       Bar
 |]
 
 $(createRoutes "MyRoutes" [$parseRoutes|
-/:
-  name: Home
-  methods: [GET]
-/user/#userid:
-  name: User
-  methods: [GET, PUT, DELETE]
-/static:
-  name: Static
-  subsite: StaticRoutes
-  dispatch: staticRoutes
-/foo/*slurp:
-  name: Foo
-/bar/$barparam:
-  name: Bar
+/                    Home       GET
+/user/#userid        User       GET PUT DELETE
+/static              Static     StaticRoutes staticRoutes
+/foo/*slurp          Foo
+/bar/$barparam       Bar
 |])
 
 main :: IO ()

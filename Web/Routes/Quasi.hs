@@ -2,16 +2,10 @@
 module Web.Routes.Quasi
     where
 
-import Data.Object.String
-import Data.Object.Yaml
-import Data.Attempt
-import Control.Monad
 import qualified Safe.Failure as SF
 import Data.Char
-import Control.Arrow
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
-import Data.ByteString.Char8 (pack)
 import Data.Data
 import Data.Maybe
 
@@ -37,24 +31,23 @@ data Piece = StaticPiece String
            | SlurpPiece String
     deriving (Read, Show, Eq, Data, Typeable)
 
-resourcesFromSO :: StringObject -> Attempt [Resource]
-resourcesFromSO = mapM go <=< fromMapping where
-    go (pattern, body) = do
-        let pieces = piecesFromString $ drop1Slash pattern
-        m <- fromMapping body
-        name <- lookupScalar "name" m
-        h <- case lookup "methods" m of
-          Just x -> do
-            methods <- fromSequence x >>= mapM (SF.read <=< fromScalar)
-            let funcs = map (id &&& (\y -> map toLower (show y) ++ name)) methods
-            return $ ByMethod funcs
-          Nothing -> case lookup "subsite" m of
-            Just x -> do
-              dt <- fromScalar x
-              dis <- lookupScalar "dispatch" m
-              return $ SubSite dt dis
-            Nothing -> return $ Single $ "handler" ++ name
-        return $ Resource name pieces h
+resourcesFromString :: String -> [Resource]
+resourcesFromString = map go . filter (not . null) . lines where
+    go s =
+        case words s of
+            (pattern:constr:rest) ->
+                let pieces = piecesFromString $ drop1Slash pattern
+                 in Resource constr pieces $ go' s constr rest
+            _ -> error $ "Invalid resource line: " ++ s
+    go' s constr rest =
+        case mapM SF.read rest of
+            Just [] -> Single $ "handle" ++ constr
+            Just x -> ByMethod
+                    $ map (\y -> (y, (map toLower $ show y) ++ constr)) x
+            Nothing ->
+                case rest of
+                    [routes, getSite] -> SubSite routes getSite
+                    _ -> error $ "Invalid resource line: " ++ s
 
 drop1Slash :: String -> String
 drop1Slash ('/':x) = x
@@ -74,12 +67,8 @@ pieceFromString x = StaticPiece x
 
 parseRoutes :: QuasiQuoter
 parseRoutes = QuasiQuoter x y where
-    x yaml = do
-        resources <- qRunIO $ fa $ decode (pack yaml) >>= resourcesFromSO
-        dataToExpQ (const Nothing) resources
-    y yaml = do
-        resources <- qRunIO $ fa $ decode (pack yaml) >>= resourcesFromSO
-        dataToPatQ (const Nothing) resources
+    x = dataToExpQ (const Nothing) . resourcesFromString
+    y = dataToPatQ (const Nothing) . resourcesFromString
 
 dataTypeDec :: String -> [Resource] -> Q Dec
 dataTypeDec name res = return $ DataD [] (mkName name) [] (map go res) claz
