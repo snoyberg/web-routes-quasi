@@ -125,9 +125,44 @@ parseDec s r = do
         re <- [|read|] -- This is really bad...
         return $ x `AppE` (re `AppE` VarE (mkName $ "var" ++ show i))
 
+renderDecType :: String -> Q Dec
+renderDecType s =
+    let str = ConT $ mkName "String"
+        strl = ListT `AppT` str
+        ret = ConT $ mkName s
+        typ = ArrowT `AppT` ret `AppT` strl
+     in return $ SigD (mkName $ "render" ++ s) typ
+
+renderDec :: String -> [Resource] -> Q Dec
+renderDec s res = FunD (mkName $ "render" ++ s) `fmap` mapM go res where
+    go (Resource n ps _) = do
+        let ps' = zip [1..] ps
+        let pat = ConP (mkName n) $ mapMaybe go' ps'
+        bod <- mkBod ps'
+        return $ Clause [pat] (NormalB bod) []
+    go' (_, StaticPiece _) = Nothing
+    go' (i, _) = Just $ VarP $ mkName $ "var" ++ show (i :: Int)
+    mkBod [] = lift ([] :: [String])
+    mkBod ((_, StaticPiece x):xs) = do
+        x' <- lift x
+        xs' <- mkBod xs
+        return $ ConE (mkName ":") `AppE` x' `AppE` xs'
+    mkBod ((i, StringPiece _):xs) = do
+        let x' = VarE $ mkName $ "var" ++ show i
+        xs' <- mkBod xs
+        return $ ConE (mkName ":") `AppE` x' `AppE` xs'
+    mkBod ((i, IntPiece _):xs) = do
+        sh <- [|show|]
+        let x' = AppE sh $ VarE $ mkName $ "var" ++ show i
+        xs' <- mkBod xs
+        return $ ConE (mkName ":") `AppE` x' `AppE` xs'
+    mkBod ((i, SlurpPiece _):_) = return $ VarE $ mkName $ "var" ++ show i
+
 createRoutes :: String -> [Resource] -> Q [Dec]
 createRoutes name res = do
     dt <- dataTypeDec name res
     pat <- parseDecType name
     pa <- parseDec name res
-    return [dt, pat, pa]
+    ret <- renderDecType name
+    re <- renderDec name res
+    return [dt, pat, pa, ret, re]

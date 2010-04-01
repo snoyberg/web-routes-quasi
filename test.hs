@@ -26,4 +26,7 @@ main = do
     print $ parseMyRoutes ["user", "6"]
     print $ parseMyRoutes ["invalid", "route"]
     print $ parseMyRoutes ["foo", "six", "seven", "8"]
+    print $ renderMyRoutes Home
+    print $ renderMyRoutes $ User 6
+    print $ renderMyRoutes $ Foo ["bar baz", "bin"]
     print $ parseMyRoutes ["user", "six"]
