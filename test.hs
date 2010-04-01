@@ -1,15 +1,8 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 import Web.Routes.Quasi
-
-resources :: [Resource]
-resources = [$parseRoutes|
-/                    Home       GET
-/user/#userid        User       GET PUT DELETE
-/static              Static     StaticRoutes staticRoutes
-/foo/*slurp          Foo
-/bar/$barparam       Bar
-|]
+import Test.QuickCheck
+import Control.Applicative
 
 $(createRoutes "MyRoutes" [$parseRoutes|
 /                    Home       GET
@@ -21,7 +14,8 @@ $(createRoutes "MyRoutes" [$parseRoutes|
 
 main :: IO ()
 main = do
-    print resources
+    quickCheck $ \s -> parseMyRoutes (renderMyRoutes s) == Right s
+
     print $ User 5
     print $ parseMyRoutes ["user", "6"]
     print $ parseMyRoutes ["invalid", "route"]
@@ -30,3 +24,12 @@ main = do
     print $ renderMyRoutes $ User 6
     print $ renderMyRoutes $ Foo ["bar baz", "bin"]
     print $ parseMyRoutes ["user", "six"]
+
+instance Arbitrary MyRoutes where
+    arbitrary = oneof
+        [ return Home
+        , User <$> arbitrary
+        , return Static -- <$> arbitrary
+        , Foo <$> arbitrary
+        , Bar <$> arbitrary
+        ]

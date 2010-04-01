@@ -80,7 +80,7 @@ dataTypeDec name res = return $ DataD [] (mkName name) [] (map go res) claz
     go' (IntPiece _) = Just (NotStrict, ConT $ mkName "Integer")
     go' (SlurpPiece _) = Just (NotStrict, AppT ListT $ ConT $ mkName "String")
     go' _ = Nothing
-    claz = [mkName "Show", mkName "Read"]
+    claz = [mkName "Show", mkName "Read", mkName "Eq"]
 
 parseDecType :: String -> Q Dec
 parseDecType s =
