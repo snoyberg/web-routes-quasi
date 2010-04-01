@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Web.Routes.Quasi
     where
 
@@ -8,6 +9,7 @@ import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
 import Data.Data
 import Data.Maybe
+import Control.Monad
 
 -- | In theory could use the definition from WAI, but:
 --
@@ -80,7 +82,52 @@ dataTypeDec name res = return $ DataD [] (mkName name) [] (map go res) claz
     go' _ = Nothing
     claz = [mkName "Show", mkName "Read"]
 
+parseDecType :: String -> Q Dec
+parseDecType s =
+    let str = ConT $ mkName "String"
+        eit = ConT $ mkName "Either"
+        ret = eit `AppT` str `AppT` (ConT $ mkName s)
+        strl = ListT `AppT` str
+        typ = ArrowT `AppT` strl `AppT` ret
+     in return $ SigD (mkName $ "parse" ++ s) typ
+
+parseDec :: String -> [Resource] -> Q Dec
+parseDec s r = do
+    final' <- final
+    clauses <- mapM go r
+    return $ FunD (mkName $ "parse" ++ s) $ clauses ++ [final']
+  where
+    msg = LitE $ StringL "Could not parse URL"
+    final = do
+        le <- [|Left|]
+        return $ Clause [WildP] (NormalB $ AppE le msg) []
+    go (Resource n ps _) = do
+        let ps' = zip [1..] ps
+        let pat = mkPat ps'
+        bod <- foldM go' (ConE $ mkName n) ps'
+        ri <- [|Right|]
+        return $ Clause [pat] (NormalB $ AppE ri bod) []
+    mkPat [] = ConP (mkName "[]") []
+    mkPat ((_, StaticPiece t):rest) = ConP (mkName ":") [ LitP (StringL t)
+                                                        , mkPat rest
+                                                        ]
+    mkPat ((i, SlurpPiece _):_) = VarP $ mkName $ "var" ++ show i
+    mkPat ((i, _):rest) = ConP (mkName ":")
+        [ VarP $ mkName $ "var" ++ show (i :: Int)
+        , mkPat rest
+        ]
+    go' x (_, StaticPiece _) = return x
+    go' x (i, SlurpPiece _) =
+        return $ x `AppE` VarE (mkName $ "var" ++ show i)
+    go' x (i, StringPiece _) =
+        return $ x `AppE` VarE (mkName $ "var" ++ show i)
+    go' x (i, IntPiece _) = do
+        re <- [|read|] -- This is really bad...
+        return $ x `AppE` (re `AppE` VarE (mkName $ "var" ++ show i))
+
 createRoutes :: String -> [Resource] -> Q [Dec]
 createRoutes name res = do
     dt <- dataTypeDec name res
-    return [dt]
+    pat <- parseDecType name
+    pa <- parseDec name res
+    return [dt, pat, pa]

@@ -23,3 +23,7 @@ main :: IO ()
 main = do
     print resources
     print $ User 5
+    print $ parseMyRoutes ["user", "6"]
+    print $ parseMyRoutes ["invalid", "route"]
+    print $ parseMyRoutes ["foo", "six", "seven", "8"]
+    print $ parseMyRoutes ["user", "six"]
