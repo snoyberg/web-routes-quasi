@@ -12,8 +12,8 @@ import Web.Routes.Site
 data StaticRoutes = StaticRoutes { unStaticRoutes :: [String] }
     deriving (Show, Read, Eq)
 
-staticRoutes :: Site StaticRoutes Application
-staticRoutes = Site
+staticRoutes :: Int -> Site StaticRoutes Application
+staticRoutes _ = Site
     undefined
     Nothing
     unStaticRoutes
@@ -56,19 +56,19 @@ badMethod = undefined
 
 main :: IO ()
 main = do
-    quickCheck $ \s -> parseMyRoutes (renderMyRoutes s) == Right s
+    quickCheck $ \s -> parseMyRoutes 20 (renderMyRoutes 20 s) == Right s
 
-    run $ dispatchMyRoutes badMethod 20 GET (show . renderMyRoutes) Home
+    run $ dispatchMyRoutes badMethod 20 GET (show . renderMyRoutes 20) Home
 
     print $ User 5
-    print $ parseMyRoutes ["user", "6"]
-    print $ parseMyRoutes ["invalid", "route"]
-    print $ parseMyRoutes ["foo", "six", "seven", "8"]
-    print $ parseMyRoutes ["static", "foo", "six", "seven", "8"]
-    print $ renderMyRoutes Home
-    print $ renderMyRoutes $ User 6
-    print $ renderMyRoutes $ Foo ["bar baz", "bin"]
-    print $ parseMyRoutes ["user", "six"]
+    print $ parseMyRoutes 20 ["user", "6"]
+    print $ parseMyRoutes 20 ["invalid", "route"]
+    print $ parseMyRoutes 20 ["foo", "six", "seven", "8"]
+    print $ parseMyRoutes 20 ["static", "foo", "six", "seven", "8"]
+    print $ renderMyRoutes 20 Home
+    print $ renderMyRoutes 20 $ User 6
+    print $ renderMyRoutes 20 $ Foo ["bar baz", "bin"]
+    print $ parseMyRoutes 20 ["user", "six"]
 
 instance Arbitrary MyRoutes where
     arbitrary = oneof

@@ -99,14 +99,15 @@ dataTypeDec name res = return $ DataD [] (mkName name) [] (map go res) claz
     go'' _ = []
     claz = [mkName "Show", mkName "Read", mkName "Eq"]
 
-parseDecType :: String -> Q Dec
-parseDecType s =
+parseDecType :: String -> Name -> Q Dec
+parseDecType s p =
     let str = ConT $ mkName "String"
         eit = ConT $ mkName "Either"
         ret = eit `AppT` str `AppT` (ConT $ mkName s)
         strl = ListT `AppT` str
         typ = ArrowT `AppT` strl `AppT` ret
-     in return $ SigD (mkName $ "parse" ++ s) typ
+        typ' = ArrowT `AppT` ConT p `AppT` typ
+     in return $ SigD (mkName $ "parse" ++ s) typ'
 
 parseDec :: String -> [Resource] -> Q Dec
 parseDec s r = do
@@ -117,7 +118,7 @@ parseDec s r = do
     msg = LitE $ StringL "Could not parse URL"
     final = do
         le <- [|Left|]
-        return $ Clause [WildP] (NormalB $ AppE le msg) []
+        return $ Clause [WildP, WildP] (NormalB $ AppE le msg) []
     go (Resource n ps h) = do
         let ps' = zip [1..] ps
         let pat = mkPat ps' h
@@ -125,7 +126,8 @@ parseDec s r = do
         bod' <- case h of
                     SubSite _ f -> do
                         parse <- [|parsePathSegments|]
-                        let parse' = parse `AppE` VarE (mkName f)
+                        let f' = VarE (mkName f) `AppE` VarE (mkName "param")
+                        let parse' = parse `AppE` f'
                         let rhs = parse' `AppE` VarE (mkName "var0")
                         fm <- [|fmapEither|]
                         return $ fm `AppE` bod `AppE` rhs
@@ -133,7 +135,8 @@ parseDec s r = do
                         ri <- [|Right|]
                         return $ AppE ri bod
         checkInts' <- checkInts ps'
-        return $ Clause [pat] (GuardedB [(NormalG checkInts', bod')]) []
+        return $ Clause [VarP $ mkName "param", pat]
+                        (GuardedB [(NormalG checkInts', bod')]) []
     mkPat [] (SubSite _ _) = VarP $ mkName "var0"
     mkPat [] _ = ConP (mkName "[]") []
     mkPat ((_, StaticPiece t):rest) h =
@@ -171,13 +174,14 @@ fmapEither :: (a -> b) -> Either x a -> Either x b
 fmapEither _ (Left x) = Left x
 fmapEither f (Right a) = Right $ f a
 
-renderDecType :: String -> Q Dec
-renderDecType s =
+renderDecType :: String -> Name -> Q Dec
+renderDecType s p =
     let str = ConT $ mkName "String"
         strl = ListT `AppT` str
         ret = ConT $ mkName s
         typ = ArrowT `AppT` ret `AppT` strl
-     in return $ SigD (mkName $ "render" ++ s) typ
+        typ' = ArrowT `AppT` ConT p `AppT` typ
+     in return $ SigD (mkName $ "render" ++ s) typ'
 
 renderDec :: String -> [Resource] -> Q Dec
 renderDec s res = FunD (mkName $ "render" ++ s) `fmap` mapM go res where
@@ -185,14 +189,15 @@ renderDec s res = FunD (mkName $ "render" ++ s) `fmap` mapM go res where
         let ps' = zip [1..] ps
         let pat = ConP (mkName n) $ mapMaybe go' ps' ++ lastPat h
         bod <- mkBod ps' h
-        return $ Clause [pat] (NormalB bod) []
+        return $ Clause [VarP $ mkName "param", pat] (NormalB bod) []
     lastPat (SubSite _ _) = [VarP $ mkName "var0"]
     lastPat _ = []
     go' (_, StaticPiece _) = Nothing
     go' (i, _) = Just $ VarP $ mkName $ "var" ++ show (i :: Int)
     mkBod [] (SubSite _ f) = do
         format <- [|formatPathSegments|]
-        let format' = format `AppE` VarE (mkName f)
+        let f' = VarE (mkName f) `AppE` VarE (mkName "param")
+        let format' = format `AppE` f'
         return $ format' `AppE` VarE (mkName "var0")
     mkBod [] _ = lift ([] :: [String])
     mkBod ((_, StaticPiece x):xs) h = do
@@ -257,7 +262,7 @@ dispDec s r = do
                     return $ CaseE (VarE method) $ matches ++ final
                 SubSite _ f -> do
                     hs <- [|handleSite|]
-                    let hs' = hs `AppE` VarE (mkName f)
+                    let hs' = hs `AppE` (VarE (mkName f) `AppE` VarE param)
                     o <- [|(.)|]
                     let render' = o `AppE` VarE render `AppE` ConE (mkName constr)
                         hs'' = hs' `AppE` render'
@@ -278,9 +283,9 @@ dispDec s r = do
 createRoutes :: String -> Name -> Name -> [Resource] -> Q [Dec]
 createRoutes name app param res = do
     dt <- dataTypeDec name res
-    pat <- parseDecType name
+    pat <- parseDecType name param
     pa <- parseDec name res
-    ret <- renderDecType name
+    ret <- renderDecType name param
     re <- renderDec name res
     dit <- dispDecType name app param
     di <- dispDec name res
