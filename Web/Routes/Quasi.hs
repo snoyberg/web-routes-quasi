@@ -33,6 +33,9 @@ data Piece = StaticPiece String
            | SlurpPiece String
     deriving (Read, Show, Eq, Data, Typeable)
 
+readMethod :: String -> Maybe Method
+readMethod = SF.read
+
 resourcesFromString :: String -> [Resource]
 resourcesFromString = map go . filter (not . null) . lines where
     go s =
@@ -42,7 +45,7 @@ resourcesFromString = map go . filter (not . null) . lines where
                  in Resource constr pieces $ go' s constr rest
             _ -> error $ "Invalid resource line: " ++ s
     go' s constr rest =
-        case mapM SF.read rest of
+        case mapM readMethod rest of
             Just [] -> Single $ "handle" ++ constr
             Just x -> ByMethod
                     $ map (\y -> (y, (map toLower $ show y) ++ constr)) x
@@ -158,11 +161,68 @@ renderDec s res = FunD (mkName $ "render" ++ s) `fmap` mapM go res where
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
     mkBod ((i, SlurpPiece _):_) = return $ VarE $ mkName $ "var" ++ show i
 
-createRoutes :: String -> [Resource] -> Q [Dec]
-createRoutes name res = do
+dispDecType :: String -> Name -> Name -> Q Dec
+dispDecType s a p = do
+    let m = ConT ''Method
+        url = ConT $ mkName s
+        str = ConT ''String
+        rend = ArrowT `AppT` url `AppT` str
+        ret1 = ArrowT `AppT` url `AppT` ConT a
+        ret2 = ArrowT `AppT` rend `AppT` ret1
+        ret3 = ArrowT `AppT` m `AppT` ret2
+        ret4 = ArrowT `AppT` ConT p `AppT` ret3
+        ret5 = ArrowT `AppT` ConT a `AppT` ret4
+    return $ SigD (mkName $ "dispatch" ++ s) ret5
+
+dispDec :: String -> [Resource] -> Q Dec
+dispDec s r = do
+    -- type: app -> param -> Method -> (url -> String) -> url -> app
+    badMethod <- newName "badMethod"
+    param <- newName "param"
+    method <- newName "method"
+    render <- newName "render"
+    url <- newName "url"
+    clauses <- mapM (go badMethod param method render url) r
+    return $ FunD (mkName $ "dispatch" ++ s) $ clauses
+  where
+    go badMethod param method render url (Resource constr ps handler) = do
+        conArgs <- go' ps
+        let pat = [ VarP badMethod, VarP param, VarP method, VarP render,
+                    ConP (mkName constr) $ map VarP conArgs]
+        b <- case handler of
+                Single s -> do
+                    let base = VarE (mkName s) `AppE` VarE param
+                                               `AppE` VarE render
+                    foldM go'' base conArgs
+                ByMethod methods -> do
+                    matches <- forM methods $ \(m, f) -> do
+                        let pat' = ConP (mkName $ show m) []
+                        let base = VarE (mkName f) `AppE` VarE param
+                                                   `AppE` VarE render
+                        bod <- foldM go'' base conArgs
+                        return $ Match pat' (NormalB bod) []
+                    let final =
+                            if length methods == 4
+                                then []
+                                else [Match WildP (NormalB $ VarE badMethod) []]
+                    return $ CaseE (VarE method) $ matches ++ final
+                _ -> return $ VarE badMethod -- FIXME
+        return $ Clause pat (NormalB b) []
+    go' [] = return []
+    go' (StaticPiece _:rest) = go' rest
+    go' (_:rest) = do
+        n <- newName "arg"
+        ns <- go' rest
+        return $ n : ns
+    go'' base arg = return $ base `AppE` VarE arg
+
+createRoutes :: String -> Name -> Name -> [Resource] -> Q [Dec]
+createRoutes name app param res = do
     dt <- dataTypeDec name res
     pat <- parseDecType name
     pa <- parseDec name res
     ret <- renderDecType name
     re <- renderDec name res
-    return [dt, pat, pa, ret, re]
+    dit <- dispDecType name app param
+    di <- dispDec name res
+    return [dt, pat, pa, ret, re, dit, di]

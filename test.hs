@@ -3,8 +3,12 @@
 import Web.Routes.Quasi
 import Test.QuickCheck
 import Control.Applicative
+import Network.Wai (Application, Response (..), Status (..))
+import Network.Wai.Enumerator
+import Network.Wai.Handler.CGI
+import Data.ByteString.Lazy.Char8 (pack)
 
-$(createRoutes "MyRoutes" [$parseRoutes|
+$(createRoutes "MyRoutes" ''Application ''Int [$parseRoutes|
 /                    Home       GET
 /user/#userid        User       GET PUT DELETE
 /static              Static     StaticRoutes staticRoutes
@@ -12,9 +16,38 @@ $(createRoutes "MyRoutes" [$parseRoutes|
 /bar/$barparam       Bar
 |])
 
+handleFoo :: Int -> (MyRoutes -> String) -> [String] -> Application
+handleFoo = undefined
+
+handleBar :: Int -> (MyRoutes -> String) -> String -> Application
+handleBar = undefined
+
+getHome :: Int -> (MyRoutes -> String) -> Application
+getHome i s _ = return $ Response
+                    Status200
+                    []
+                    $ Right $ fromLBS $ pack $ show
+                        [ show i
+                        , s $ Foo ["bar baz+bin"]
+                        ]
+
+getUser :: Int -> (MyRoutes -> String) -> Integer -> Application
+getUser = undefined
+
+putUser :: Int -> (MyRoutes -> String) -> Integer -> Application
+putUser = undefined
+
+deleteUser :: Int -> (MyRoutes -> String) -> Integer -> Application
+deleteUser = undefined
+
+badMethod :: Application
+badMethod = undefined
+
 main :: IO ()
 main = do
     quickCheck $ \s -> parseMyRoutes (renderMyRoutes s) == Right s
+
+    run $ dispatchMyRoutes badMethod 20 GET (show . renderMyRoutes) Home
 
     print $ User 5
     print $ parseMyRoutes ["user", "6"]
