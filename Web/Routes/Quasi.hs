@@ -34,9 +34,11 @@ data Piece = StaticPiece String
            | SlurpPiece String
     deriving (Read, Show, Eq, Data, Typeable)
 
+isStatic :: Piece -> Bool
 isStatic (StaticPiece _) = True
 isStatic _ = False
 
+isSubSite :: Handler -> Bool
 isSubSite (SubSite _ _) = True
 isSubSite _ = False
 
@@ -126,7 +128,7 @@ parseDec s r = do
         bod' <- case h of
                     SubSite _ f -> do
                         parse <- [|parsePathSegments|]
-                        let f' = VarE (mkName f) `AppE` VarE (mkName "param")
+                        let f' = VarE (mkName f) `AppE` VarE (mkName "_param")
                         let parse' = parse `AppE` f'
                         let rhs = parse' `AppE` VarE (mkName "var0")
                         fm <- [|fmapEither|]
@@ -135,7 +137,7 @@ parseDec s r = do
                         ri <- [|Right|]
                         return $ AppE ri bod
         checkInts' <- checkInts ps'
-        return $ Clause [VarP $ mkName "param", pat]
+        return $ Clause [VarP $ mkName "_param", pat]
                         (GuardedB [(NormalG checkInts', bod')]) []
     mkPat [] (SubSite _ _) = VarP $ mkName "var0"
     mkPat [] _ = ConP (mkName "[]") []
@@ -189,14 +191,14 @@ renderDec s res = FunD (mkName $ "render" ++ s) `fmap` mapM go res where
         let ps' = zip [1..] ps
         let pat = ConP (mkName n) $ mapMaybe go' ps' ++ lastPat h
         bod <- mkBod ps' h
-        return $ Clause [VarP $ mkName "param", pat] (NormalB bod) []
+        return $ Clause [VarP $ mkName "_param", pat] (NormalB bod) []
     lastPat (SubSite _ _) = [VarP $ mkName "var0"]
     lastPat _ = []
     go' (_, StaticPiece _) = Nothing
     go' (i, _) = Just $ VarP $ mkName $ "var" ++ show (i :: Int)
     mkBod [] (SubSite _ f) = do
         format <- [|formatPathSegments|]
-        let f' = VarE (mkName f) `AppE` VarE (mkName "param")
+        let f' = VarE (mkName f) `AppE` VarE (mkName "_param")
         let format' = format `AppE` f'
         return $ format' `AppE` VarE (mkName "var0")
     mkBod [] _ = lift ([] :: [String])
@@ -231,21 +233,20 @@ dispDecType s a p = do
 dispDec :: String -> [Resource] -> Q Dec
 dispDec s r = do
     -- type: app -> param -> Method -> (url -> String) -> url -> app
-    badMethod <- newName "badMethod"
-    param <- newName "param"
-    method <- newName "method"
+    badMethod <- newName "_badMethod"
+    param <- newName "_param"
+    method <- newName "_method"
     render <- newName "render"
-    url <- newName "url"
-    clauses <- mapM (go badMethod param method render url) r
+    clauses <- mapM (go badMethod param method render) r
     return $ FunD (mkName $ "dispatch" ++ s) $ clauses
   where
-    go badMethod param method render url (Resource constr ps handler) = do
+    go badMethod param method render (Resource constr ps handler) = do
         conArgs <- go' ps handler
         let pat = [ VarP badMethod, VarP param, VarP method, VarP render,
                     ConP (mkName constr) $ map VarP conArgs]
         b <- case handler of
-                Single s -> do
-                    let base = VarE (mkName s) `AppE` VarE param
+                Single s' -> do
+                    let base = VarE (mkName s') `AppE` VarE param
                                                `AppE` VarE render
                     foldM go'' base conArgs
                 ByMethod methods -> do
@@ -280,6 +281,44 @@ dispDec s r = do
         return $ n : ns
     go'' base arg = return $ base `AppE` VarE arg
 
+siteDecType :: String -> Name -> Name -> Q Dec
+siteDecType s a p = do
+    let ret = ConT ''Site `AppT` ConT (mkName s) `AppT` ConT a
+        ret1 = ArrowT `AppT` ConT p `AppT` ret
+        ret2 = ArrowT `AppT` ConT a `AppT` ret1
+        methodToApp = ArrowT `AppT` ConT ''Method `AppT` ConT a
+        mtaToApp = ArrowT `AppT` methodToApp `AppT` ConT a
+        ret3 = ArrowT `AppT` mtaToApp `AppT` ret2
+    return $ SigD (mkName $ "site" ++ s) ret3
+
+siteDec :: String -> Q Dec
+siteDec s = do
+    -- ((Method -> app) -> app) -> app -> param -> Site routes app
+    m <- newName "getMethod"
+    bm <- newName "badMethod"
+    p <- newName "param"
+    body <- go (VarE m) (VarE bm) (VarE p)
+    return $ FunD (mkName $ "site" ++ s)
+        [ Clause [VarP m, VarP bm, VarP p] (NormalB body) []
+        ]
+  where
+    go m bm p = do
+        let hs = VarE (mkName $ "dispatch" ++ s)
+                    `AppE` bm
+                    `AppE` p
+        gm <- [|grabMethod|]
+        let hs' = gm `AppE` m `AppE` hs
+        dp <- [|Nothing|]
+        let fps = VarE (mkName $ "render" ++ s) `AppE` p
+        let pps = VarE (mkName $ "parse" ++ s) `AppE` p
+        si <- [|Site|]
+        return $ si `AppE` hs' `AppE` dp `AppE` fps `AppE` pps
+
+grabMethod :: ((Method -> app) -> app)
+           -> (Method -> (url -> String) -> url -> app)
+           -> (url -> String) -> url -> app
+grabMethod m t render url = m $ \method -> t method render url
+
 createRoutes :: String -> Name -> Name -> [Resource] -> Q [Dec]
 createRoutes name app param res = do
     dt <- dataTypeDec name res
@@ -289,4 +328,6 @@ createRoutes name app param res = do
     re <- renderDec name res
     dit <- dispDecType name app param
     di <- dispDec name res
-    return [dt, pat, pa, ret, re, dit, di]
+    st <- siteDecType name app param
+    s <- siteDec name
+    return [dt, pat, pa, ret, re, dit, di, st, s]
