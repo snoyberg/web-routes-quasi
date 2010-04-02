@@ -34,6 +34,12 @@ data Piece = StaticPiece String
            | SlurpPiece String
     deriving (Read, Show, Eq, Data, Typeable)
 
+isStatic (StaticPiece _) = True
+isStatic _ = False
+
+isSubSite (SubSite _ _) = True
+isSubSite _ = False
+
 readMethod :: String -> Maybe Method
 readMethod = SF.read
 
@@ -43,7 +49,10 @@ resourcesFromString = map go . filter (not . null) . lines where
         case words s of
             (pattern:constr:rest) ->
                 let pieces = piecesFromString $ drop1Slash pattern
-                 in Resource constr pieces $ go' s constr rest
+                    handler = go' s constr rest
+                 in if all isStatic pieces || not (isSubSite handler)
+                        then Resource constr pieces handler
+                        else error "Subsites must have static pieces"
             _ -> error $ "Invalid resource line: " ++ s
     go' s constr rest =
         case mapM readMethod rest of
@@ -141,7 +150,7 @@ parseDec s r = do
     go' x (i, StringPiece _) =
         return $ x `AppE` VarE (mkName $ "var" ++ show i)
     go' x (i, IntPiece _) = do
-        re <- [|read|] -- This is really bad...
+        re <- [|read|] -- FIXME This is really bad...
         return $ x `AppE` (re `AppE` VarE (mkName $ "var" ++ show i))
 
 fmapEither :: (a -> b) -> Either x a -> Either x b
@@ -232,7 +241,14 @@ dispDec s r = do
                                 then []
                                 else [Match WildP (NormalB $ VarE badMethod) []]
                     return $ CaseE (VarE method) $ matches ++ final
-                _ -> return $ VarE badMethod -- FIXME
+                SubSite _ f -> do
+                    hs <- [|handleSite|]
+                    let hs' = hs `AppE` VarE (mkName f)
+                    o <- [|(.)|]
+                    let render' = o `AppE` VarE render `AppE` ConE (mkName constr)
+                        hs'' = hs' `AppE` render'
+                        hs''' = hs'' `AppE` VarE (last conArgs)
+                    return hs'''
         return $ Clause pat (NormalB b) []
     go' [] (SubSite _ _) = do
         n <- newName "arg"
