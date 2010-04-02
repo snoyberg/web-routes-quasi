@@ -1,7 +1,16 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Web.Routes.Quasi
-    where
+    ( -- * Data types
+      Method (..)
+    , Resource (..)
+    , Handler (..)
+    , Piece (..)
+      -- * Quasi quoter
+    , parseRoutes
+      -- * Template haskell
+    , createRoutes
+    ) where
 
 import qualified Safe.Failure as SF
 import Data.Char

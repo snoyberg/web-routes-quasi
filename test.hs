@@ -130,3 +130,7 @@ splitPath "" = []
 splitPath x =
     let (y, z) = break (== '/') x
      in y : splitPath (drop1Slash z)
+
+drop1Slash :: String -> String
+drop1Slash ('/':x) = x
+drop1Slash x = x
