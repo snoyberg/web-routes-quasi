@@ -132,7 +132,8 @@ parseDec s r = do
                     _ -> do
                         ri <- [|Right|]
                         return $ AppE ri bod
-        return $ Clause [pat] (NormalB bod') []
+        checkInts' <- checkInts ps'
+        return $ Clause [pat] (GuardedB [(NormalG checkInts', bod')]) []
     mkPat [] (SubSite _ _) = VarP $ mkName "var0"
     mkPat [] _ = ConP (mkName "[]") []
     mkPat ((_, StaticPiece t):rest) h =
@@ -150,8 +151,21 @@ parseDec s r = do
     go' x (i, StringPiece _) =
         return $ x `AppE` VarE (mkName $ "var" ++ show i)
     go' x (i, IntPiece _) = do
-        re <- [|read|] -- FIXME This is really bad...
+        re <- [|read|]
         return $ x `AppE` (re `AppE` VarE (mkName $ "var" ++ show i))
+    checkInts [] = [|True|]
+    checkInts ((i, IntPiece _):rest) = do
+        ii <- [|isInt|]
+        a <- [|(&&)|]
+        rest' <- checkInts rest
+        return $ a `AppE` (ii `AppE` VarE (mkName $ "var" ++ show i))
+                   `AppE` rest'
+    checkInts (_:rest) = checkInts rest
+
+isInt :: String -> Bool
+isInt [] = False
+isInt ('-':rest) = all isDigit rest
+isInt x = all isDigit x
 
 fmapEither :: (a -> b) -> Either x a -> Either x b
 fmapEither _ (Left x) = Left x
