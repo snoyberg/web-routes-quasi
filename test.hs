@@ -7,6 +7,17 @@ import Network.Wai (Application, Response (..), Status (..))
 import Network.Wai.Enumerator
 import Network.Wai.Handler.CGI
 import Data.ByteString.Lazy.Char8 (pack)
+import Web.Routes.Site
+
+data StaticRoutes = StaticRoutes { unStaticRoutes :: [String] }
+    deriving (Show, Read, Eq)
+
+staticRoutes :: Site StaticRoutes Application
+staticRoutes = Site
+    undefined
+    Nothing
+    unStaticRoutes
+    (Right . StaticRoutes)
 
 $(createRoutes "MyRoutes" ''Application ''Int [$parseRoutes|
 /                    Home       GET
@@ -53,6 +64,7 @@ main = do
     print $ parseMyRoutes ["user", "6"]
     print $ parseMyRoutes ["invalid", "route"]
     print $ parseMyRoutes ["foo", "six", "seven", "8"]
+    print $ parseMyRoutes ["static", "foo", "six", "seven", "8"]
     print $ renderMyRoutes Home
     print $ renderMyRoutes $ User 6
     print $ renderMyRoutes $ Foo ["bar baz", "bin"]
@@ -62,7 +74,7 @@ instance Arbitrary MyRoutes where
     arbitrary = oneof
         [ return Home
         , User <$> arbitrary
-        , return Static -- <$> arbitrary
+        , Static . StaticRoutes <$> arbitrary
         , Foo <$> arbitrary
         , Bar <$> arbitrary
         ]

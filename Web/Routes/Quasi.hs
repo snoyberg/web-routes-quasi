@@ -10,6 +10,7 @@ import Language.Haskell.TH.Quote
 import Data.Data
 import Data.Maybe
 import Control.Monad
+import Web.Routes.Site
 
 -- | In theory could use the definition from WAI, but:
 --
@@ -78,11 +79,15 @@ parseRoutes = QuasiQuoter x y where
 dataTypeDec :: String -> [Resource] -> Q Dec
 dataTypeDec name res = return $ DataD [] (mkName name) [] (map go res) claz
   where
-    go (Resource n pieces _) = NormalC (mkName n) $ mapMaybe go' pieces
+    go (Resource n pieces h) = NormalC (mkName n)
+                             $ mapMaybe go' pieces
+                            ++ go'' h
     go' (StringPiece _) = Just (NotStrict, ConT $ mkName "String")
     go' (IntPiece _) = Just (NotStrict, ConT $ mkName "Integer")
     go' (SlurpPiece _) = Just (NotStrict, AppT ListT $ ConT $ mkName "String")
     go' _ = Nothing
+    go'' (SubSite t _) = [(NotStrict, ConT $ mkName t)]
+    go'' _ = []
     claz = [mkName "Show", mkName "Read", mkName "Eq"]
 
 parseDecType :: String -> Q Dec
@@ -104,20 +109,31 @@ parseDec s r = do
     final = do
         le <- [|Left|]
         return $ Clause [WildP] (NormalB $ AppE le msg) []
-    go (Resource n ps _) = do
+    go (Resource n ps h) = do
         let ps' = zip [1..] ps
-        let pat = mkPat ps'
+        let pat = mkPat ps' h
         bod <- foldM go' (ConE $ mkName n) ps'
-        ri <- [|Right|]
-        return $ Clause [pat] (NormalB $ AppE ri bod) []
-    mkPat [] = ConP (mkName "[]") []
-    mkPat ((_, StaticPiece t):rest) = ConP (mkName ":") [ LitP (StringL t)
-                                                        , mkPat rest
-                                                        ]
-    mkPat ((i, SlurpPiece _):_) = VarP $ mkName $ "var" ++ show i
-    mkPat ((i, _):rest) = ConP (mkName ":")
+        bod' <- case h of
+                    SubSite _ f -> do
+                        parse <- [|parsePathSegments|]
+                        let parse' = parse `AppE` VarE (mkName f)
+                        let rhs = parse' `AppE` VarE (mkName "var0")
+                        fm <- [|fmapEither|]
+                        return $ fm `AppE` bod `AppE` rhs
+                    _ -> do
+                        ri <- [|Right|]
+                        return $ AppE ri bod
+        return $ Clause [pat] (NormalB bod') []
+    mkPat [] (SubSite _ _) = VarP $ mkName "var0"
+    mkPat [] _ = ConP (mkName "[]") []
+    mkPat ((_, StaticPiece t):rest) h =
+        ConP (mkName ":") [ LitP (StringL t)
+                          , mkPat rest h
+                          ]
+    mkPat ((i, SlurpPiece _):_) _ = VarP $ mkName $ "var" ++ show i
+    mkPat ((i, _):rest) h = ConP (mkName ":")
         [ VarP $ mkName $ "var" ++ show (i :: Int)
-        , mkPat rest
+        , mkPat rest h
         ]
     go' x (_, StaticPiece _) = return x
     go' x (i, SlurpPiece _) =
@@ -127,6 +143,10 @@ parseDec s r = do
     go' x (i, IntPiece _) = do
         re <- [|read|] -- This is really bad...
         return $ x `AppE` (re `AppE` VarE (mkName $ "var" ++ show i))
+
+fmapEither :: (a -> b) -> Either x a -> Either x b
+fmapEither _ (Left x) = Left x
+fmapEither f (Right a) = Right $ f a
 
 renderDecType :: String -> Q Dec
 renderDecType s =
@@ -138,28 +158,34 @@ renderDecType s =
 
 renderDec :: String -> [Resource] -> Q Dec
 renderDec s res = FunD (mkName $ "render" ++ s) `fmap` mapM go res where
-    go (Resource n ps _) = do
+    go (Resource n ps h) = do
         let ps' = zip [1..] ps
-        let pat = ConP (mkName n) $ mapMaybe go' ps'
-        bod <- mkBod ps'
+        let pat = ConP (mkName n) $ mapMaybe go' ps' ++ lastPat h
+        bod <- mkBod ps' h
         return $ Clause [pat] (NormalB bod) []
+    lastPat (SubSite _ _) = [VarP $ mkName "var0"]
+    lastPat _ = []
     go' (_, StaticPiece _) = Nothing
     go' (i, _) = Just $ VarP $ mkName $ "var" ++ show (i :: Int)
-    mkBod [] = lift ([] :: [String])
-    mkBod ((_, StaticPiece x):xs) = do
+    mkBod [] (SubSite _ f) = do
+        format <- [|formatPathSegments|]
+        let format' = format `AppE` VarE (mkName f)
+        return $ format' `AppE` VarE (mkName "var0")
+    mkBod [] _ = lift ([] :: [String])
+    mkBod ((_, StaticPiece x):xs) h = do
         x' <- lift x
-        xs' <- mkBod xs
+        xs' <- mkBod xs h
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
-    mkBod ((i, StringPiece _):xs) = do
+    mkBod ((i, StringPiece _):xs) h = do
         let x' = VarE $ mkName $ "var" ++ show i
-        xs' <- mkBod xs
+        xs' <- mkBod xs h
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
-    mkBod ((i, IntPiece _):xs) = do
+    mkBod ((i, IntPiece _):xs) h= do
         sh <- [|show|]
         let x' = AppE sh $ VarE $ mkName $ "var" ++ show i
-        xs' <- mkBod xs
+        xs' <- mkBod xs h
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
-    mkBod ((i, SlurpPiece _):_) = return $ VarE $ mkName $ "var" ++ show i
+    mkBod ((i, SlurpPiece _):_) _ = return $ VarE $ mkName $ "var" ++ show i
 
 dispDecType :: String -> Name -> Name -> Q Dec
 dispDecType s a p = do
@@ -186,7 +212,7 @@ dispDec s r = do
     return $ FunD (mkName $ "dispatch" ++ s) $ clauses
   where
     go badMethod param method render url (Resource constr ps handler) = do
-        conArgs <- go' ps
+        conArgs <- go' ps handler
         let pat = [ VarP badMethod, VarP param, VarP method, VarP render,
                     ConP (mkName constr) $ map VarP conArgs]
         b <- case handler of
@@ -208,11 +234,14 @@ dispDec s r = do
                     return $ CaseE (VarE method) $ matches ++ final
                 _ -> return $ VarE badMethod -- FIXME
         return $ Clause pat (NormalB b) []
-    go' [] = return []
-    go' (StaticPiece _:rest) = go' rest
-    go' (_:rest) = do
+    go' [] (SubSite _ _) = do
         n <- newName "arg"
-        ns <- go' rest
+        return [n]
+    go' [] _ = return []
+    go' (StaticPiece _:rest) h = go' rest h
+    go' (_:rest) h = do
+        n <- newName "arg"
+        ns <- go' rest h
         return $ n : ns
     go'' base arg = return $ base `AppE` VarE arg
 
