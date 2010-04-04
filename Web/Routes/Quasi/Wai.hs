@@ -20,7 +20,7 @@ data WaiArgs = WaiArgs
     , wai404 :: Application
     }
 
-waiSite :: (((Q.Method -> Application) -> Application) -> Application -> args -> Site url Application)
+waiSite :: (((String -> Application) -> Application) -> Application -> args -> Site url Application)
         -> WaiArgs
         -> args
         -> Application
@@ -36,19 +36,11 @@ waiSite s wa args req = do
                             (formatPathSegments site u)
              in handleSite site format url req
 
-grabMethod :: WaiArgs -> (Q.Method -> Application) -> Application
-grabMethod wa f req =
-    case readMethod $ requestMethod req of
-        Nothing -> waiBadMethod wa req
-        Just m -> f m req
+grabMethod :: WaiArgs -> (String -> Application) -> Application
+grabMethod wa f req = f (readMethod $ requestMethod req) req
 
-readMethod :: Method -> Maybe Q.Method
-readMethod m
-    | m == GET    = Just Q.GET
-    | m == POST   = Just Q.POST
-    | m == PUT    = Just Q.PUT
-    | m == DELETE = Just Q.DELETE
-    | otherwise   = Nothing
+readMethod :: Method -> String
+readMethod = unpack . methodToBS
 
 defBadMethod :: Application
 defBadMethod _ = return $ Response

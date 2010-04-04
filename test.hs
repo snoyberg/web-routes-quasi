@@ -3,7 +3,7 @@
 import Web.Routes.Quasi
 import Test.QuickCheck
 import Control.Applicative
-import Network.Wai (Application, Response (..), Status (..), Request (..))
+import Network.Wai
 import Network.Wai.Enumerator
 import Network.Wai.Handler.SimpleServer
 import Data.ByteString.Lazy.Char8 (pack)
@@ -82,8 +82,8 @@ badMethod _ = return $ Response
 site :: Site MyRoutes Application
 site = siteMyRoutes getMethod badMethod 20
 
-getMethod :: (Method -> Application) -> Application
-getMethod m = m GET -- FIXME
+getMethod :: (String -> Application) -> Application
+getMethod m = m "GET" -- FIXME
 
 main :: IO ()
 main = do

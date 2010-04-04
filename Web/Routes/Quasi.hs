@@ -2,8 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Web.Routes.Quasi
     ( -- * Data types
-      Method (..)
-    , Resource (..)
+      Resource (..)
     , Handler (..)
     , Piece (..)
       -- * Quasi quoter
@@ -12,7 +11,6 @@ module Web.Routes.Quasi
     , createRoutes
     ) where
 
-import qualified Safe.Failure as SF
 import Data.Char
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
@@ -21,18 +19,10 @@ import Data.Maybe
 import Control.Monad
 import Web.Routes.Site
 
--- | In theory could use the definition from WAI, but:
---
--- * that would introduce a dependency on WAI
---
--- * we want to constrain this to only certain methods
-data Method = GET | PUT | POST | DELETE
-    deriving (Read, Show, Eq, Data, Typeable)
-
 data Resource = Resource String [Piece] Handler
     deriving (Read, Show, Eq, Data, Typeable)
 
-data Handler = ByMethod [(Method, String)]
+data Handler = ByMethod [(String, String)] -- ^ (method, handler)
              | Single String
              | SubSite String String
     deriving (Read, Show, Eq, Data, Typeable)
@@ -51,29 +41,22 @@ isSubSite :: Handler -> Bool
 isSubSite (SubSite _ _) = True
 isSubSite _ = False
 
-readMethod :: String -> Maybe Method
-readMethod = SF.read
-
 resourcesFromString :: String -> [Resource]
 resourcesFromString = map go . filter (not . null) . lines where
     go s =
         case words s of
             (pattern:constr:rest) ->
                 let pieces = piecesFromString $ drop1Slash pattern
-                    handler = go' s constr rest
+                    handler = go' constr rest
                  in if all isStatic pieces || not (isSubSite handler)
                         then Resource constr pieces handler
                         else error "Subsites must have static pieces"
             _ -> error $ "Invalid resource line: " ++ s
-    go' s constr rest =
-        case mapM readMethod rest of
-            Just [] -> Single $ "handle" ++ constr
-            Just x -> ByMethod
-                    $ map (\y -> (y, (map toLower $ show y) ++ constr)) x
-            Nothing ->
-                case rest of
-                    [routes, getSite] -> SubSite routes getSite
-                    _ -> error $ "Invalid resource line: " ++ s
+    go' constr [] = Single $ "handle" ++ constr
+    go' _ [routes, getSite@(x:_)]
+        | isLower x = SubSite routes getSite
+    go' constr rest = ByMethod
+                      $ map (\x -> (x, map toLower x ++ constr)) rest
 
 drop1Slash :: String -> String
 drop1Slash ('/':x) = x
@@ -228,7 +211,7 @@ renderDec s res = FunD (mkName $ "render" ++ s) `fmap` mapM go res where
 
 dispDecType :: String -> Name -> Name -> Q Dec
 dispDecType s a p = do
-    let m = ConT ''Method
+    let m = ConT ''String
         url = ConT $ mkName s
         str = ConT ''String
         rend = ArrowT `AppT` url `AppT` str
@@ -260,7 +243,7 @@ dispDec s r = do
                     foldM go'' base conArgs
                 ByMethod methods -> do
                     matches <- forM methods $ \(m, f) -> do
-                        let pat' = ConP (mkName $ show m) []
+                        let pat' = LitP $ StringL m
                         let base = VarE (mkName f) `AppE` VarE param
                                                    `AppE` VarE render
                         bod <- foldM go'' base conArgs
@@ -295,7 +278,7 @@ siteDecType s a p = do
     let ret = ConT ''Site `AppT` ConT (mkName s) `AppT` ConT a
         ret1 = ArrowT `AppT` ConT p `AppT` ret
         ret2 = ArrowT `AppT` ConT a `AppT` ret1
-        methodToApp = ArrowT `AppT` ConT ''Method `AppT` ConT a
+        methodToApp = ArrowT `AppT` ConT ''String `AppT` ConT a
         mtaToApp = ArrowT `AppT` methodToApp `AppT` ConT a
         ret3 = ArrowT `AppT` mtaToApp `AppT` ret2
     return $ SigD (mkName $ "site" ++ s) ret3
@@ -323,8 +306,8 @@ siteDec s = do
         si <- [|Site|]
         return $ si `AppE` hs' `AppE` dp `AppE` fps `AppE` pps
 
-grabMethod :: ((Method -> app) -> app)
-           -> (Method -> (url -> String) -> url -> app)
+grabMethod :: ((String -> app) -> app)
+           -> (String -> (url -> String) -> url -> app)
            -> (url -> String) -> url -> app
 grabMethod m t render url = m $ \method -> t method render url
 
