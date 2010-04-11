@@ -101,7 +101,7 @@ main = do
     print $ renderMyRoutes 20 $ Foo ["bar baz", "bin"]
     print $ parseMyRoutes 20 ["user", "six"]
 
-    run 3000 $ waiSite site --"http://localhost:3000"
+    --run 3000 $ waiSite site --"http://localhost:3000"
 
 instance Arbitrary MyRoutes where
     arbitrary = oneof
