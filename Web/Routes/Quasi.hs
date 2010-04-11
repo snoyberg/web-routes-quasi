@@ -222,8 +222,8 @@ dispDecType s a p = do
         ret5 = ArrowT `AppT` ConT a `AppT` ret4
     return $ SigD (mkName $ "dispatch" ++ s) ret5
 
-dispDec :: String -> [Resource] -> Q Dec
-dispDec s r = do
+dispDec :: String -> [Resource] -> String -> Q Dec
+dispDec s r explode = do
     -- type: app -> param -> Method -> (url -> String) -> url -> app
     badMethod <- newName "_badMethod"
     param <- newName "_param"
@@ -238,15 +238,16 @@ dispDec s r = do
                     ConP (mkName constr) $ map VarP conArgs]
         b <- case handler of
                 Single s' -> do
-                    let base = VarE (mkName s') `AppE` VarE param
-                                               `AppE` VarE render
-                    foldM go'' base conArgs
+                    unexploded <- foldM go'' (VarE $ mkName s') conArgs
+                    let exploded = VarE (mkName explode) `AppE` unexploded
+                    return $ exploded `AppE` VarE param `AppE` VarE render
                 ByMethod methods -> do
                     matches <- forM methods $ \(m, f) -> do
                         let pat' = LitP $ StringL m
-                        let base = VarE (mkName f) `AppE` VarE param
-                                                   `AppE` VarE render
-                        bod <- foldM go'' base conArgs
+                        unexploded <- foldM go'' (VarE $ mkName f) conArgs
+                        let exploded = VarE (mkName explode) `AppE` unexploded
+                        let bod = exploded `AppE` VarE param
+                                           `AppE` VarE render
                         return $ Match pat' (NormalB bod) []
                     let final =
                             if length methods == 4
@@ -311,15 +312,15 @@ grabMethod :: ((String -> app) -> app)
            -> (url -> String) -> url -> app
 grabMethod m t render url = m $ \method -> t method render url
 
-createRoutes :: String -> Name -> Name -> [Resource] -> Q [Dec]
-createRoutes name app param res = do
+createRoutes :: String -> Name -> Name -> String -> [Resource] -> Q [Dec]
+createRoutes name app param explode res = do
     dt <- dataTypeDec name res
     pat <- parseDecType name param
     pa <- parseDec name res
     ret <- renderDecType name param
     re <- renderDec name res
     dit <- dispDecType name app param
-    di <- dispDec name res
+    di <- dispDec name res explode
     st <- siteDecType name app param
     s <- siteDec name
     return [dt, pat, pa, ret, re, dit, di, st, s]
