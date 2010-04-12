@@ -2,9 +2,9 @@
 {-# LANGUAGE QuasiQuotes #-}
 module Blog where
 
-import Web.Routes.Quasi
+import Web.Routes.Quasi (parseRoutes, createRoutes)
 import Web.Routes.Site
-import Network.Wai hiding (Method (..))
+import Network.Wai
 import Network.Wai.Enumerator
 import Static
 

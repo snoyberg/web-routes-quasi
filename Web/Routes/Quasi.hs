@@ -41,8 +41,11 @@ isSubSite :: Handler -> Bool
 isSubSite (SubSite _ _) = True
 isSubSite _ = False
 
+trim :: String -> String
+trim = dropWhile isSpace
+
 resourcesFromString :: String -> [Resource]
-resourcesFromString = map go . filter (not . null) . lines where
+resourcesFromString = map go . filter (not . null) . map trim . lines where
     go s =
         case words s of
             (pattern:constr:rest) ->
@@ -76,8 +79,52 @@ pieceFromString x = StaticPiece x
 
 parseRoutes :: QuasiQuoter
 parseRoutes = QuasiQuoter x y where
-    x = dataToExpQ (const Nothing) . resourcesFromString
+    x = liftResources . resourcesFromString
     y = dataToPatQ (const Nothing) . resourcesFromString
+
+liftResources :: [Resource] -> Q Exp
+liftResources = fmap ListE . mapM go where
+    go :: Resource -> Q Exp
+    go (Resource s ps h) = do
+        r <- [|Resource|]
+        s' <- lift s
+        ps' <- liftPieces ps
+        h' <- liftHandler h
+        return $ r `AppE` s' `AppE` ps' `AppE` h'
+
+liftPieces :: [Piece] -> Q Exp
+liftPieces = fmap ListE . mapM go where
+    go (StaticPiece s) = do
+        c <- [|StaticPiece|]
+        s' <- lift s
+        return $ c `AppE` s'
+    go (StringPiece s) = do
+        c <- [|StringPiece|]
+        s' <- lift s
+        return $ c `AppE` s'
+    go (IntPiece s) = do
+        c <- [|IntPiece|]
+        s' <- lift s
+        return $ c `AppE` s'
+    go (SlurpPiece s) = do
+        c <- [|SlurpPiece|]
+        s' <- lift s
+        return $ c `AppE` s'
+
+liftHandler :: Handler -> Q Exp
+liftHandler (ByMethod s) = do
+    c <- [|ByMethod|]
+    s' <- lift s
+    return $ c `AppE` s'
+liftHandler (Single s) = do
+    c <- [|Single|]
+    s' <- lift s
+    return $ c `AppE` s'
+liftHandler (SubSite x y) = do
+    c <- [|SubSite|]
+    x' <- lift x
+    y' <- lift y
+    return $ c `AppE` x' `AppE` y'
 
 dataTypeDec :: String -> [Resource] -> Q Dec
 dataTypeDec name res = return $ DataD [] (mkName name) [] (map go res) claz
