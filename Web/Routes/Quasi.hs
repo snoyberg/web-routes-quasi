@@ -373,11 +373,10 @@ siteDec s = do
                     `AppE` p
         gm <- [|grabMethod|]
         let hs' = gm `AppE` m `AppE` hs
-        dp <- [|Nothing|]
         let fps = VarE (mkName $ "render" ++ s) `AppE` p
         let pps = VarE (mkName $ "parse" ++ s) `AppE` p
         si <- [|Site|]
-        return $ si `AppE` hs' `AppE` dp `AppE` fps `AppE` pps
+        return $ si `AppE` hs' `AppE` fps `AppE` pps
 
 grabMethod :: ((String -> app) -> app)
            -> (String -> (url -> String) -> url -> app)

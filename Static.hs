@@ -13,7 +13,6 @@ data StaticRoutes = StaticRoutes { unStaticRoutes :: [String] }
 siteStatic :: FilePath -> Site StaticRoutes Application
 siteStatic fp = Site
     { handleSite = \_ (StaticRoutes r) _ -> serveFile fp r
-    , defaultPage = Nothing
     , formatPathSegments = unStaticRoutes
     , parsePathSegments = Right . StaticRoutes
     }

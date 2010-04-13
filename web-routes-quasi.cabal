@@ -17,7 +17,7 @@ flag buildtests
 
 library
     build-depends:   base >= 4 && < 5,
-                     web-routes >= 0.20 && < 0.21,
+                     web-routes >= 0.22 && < 0.23,
                      template-haskell
     exposed-modules: Web.Routes.Quasi
     ghc-options:     -Wall
