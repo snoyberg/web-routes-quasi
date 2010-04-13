@@ -9,7 +9,7 @@ category:        Web
 stability:       unstable
 cabal-version:   >= 1.6
 build-type:      Simple
-homepage:        http://www.yesodweb.com/
+homepage:        http://docs.yesodweb.com/web-routes-quasi/
 
 flag buildtests
   description: Build the executable to run unit tests

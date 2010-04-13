@@ -19,14 +19,34 @@ import Data.Maybe
 import Control.Monad
 import Web.Routes.Site
 
+-- | A single resource pattern.
+--
+-- First argument is the name of the constructor, second is that URL pattern to
+-- match, third is how to dispatch.
 data Resource = Resource String [Piece] Handler
     deriving (Read, Show, Eq, Data, Typeable)
 
+-- | Defines how to dispatch a request for a specific resource.
+--
+-- ByMethod allows a different function to be called for each request method.
+-- The first value in each pair is the method, the second is the name of the
+-- handler.
+--
+-- Single dispatches to a single function for all methods.
+--
+-- SubSite passes dispatch to a different site. The first argument is the name
+-- of the datatype for the routes. The second is a function returning a 'Site'
+-- for that type of routes.
 data Handler = ByMethod [(String, String)] -- ^ (method, handler)
              | Single String
              | SubSite String String
     deriving (Read, Show, Eq, Data, Typeable)
 
+-- | A single piece of a URL, delimited by slashes.
+--
+-- In the case of StaticPiece, the argument is the value of the piece; for the
+-- other constructors, it is the name of the parameter represented by this
+-- piece. That value is not used here, but may be useful elsewhere.
 data Piece = StaticPiece String
            | StringPiece String
            | IntPiece String
@@ -41,9 +61,13 @@ isSubSite :: Handler -> Bool
 isSubSite (SubSite _ _) = True
 isSubSite _ = False
 
+-- | Drop leading whitespace.
 trim :: String -> String
 trim = dropWhile isSpace
 
+-- | Convert a multi-line string to a set of resources. See documentation for
+-- the format of this string. This is a partial function which calls error on
+-- invalid input.
 resourcesFromString :: String -> [Resource]
 resourcesFromString = map go . filter (not . null) . map trim . lines where
     go s =
@@ -77,6 +101,7 @@ pieceFromString ('#':x) = IntPiece x
 pieceFromString ('*':x) = SlurpPiece x
 pieceFromString x = StaticPiece x
 
+-- | A quasi-quoter to parse a string into a list of 'Resource's.
 parseRoutes :: QuasiQuoter
 parseRoutes = QuasiQuoter x y where
     x = liftResources . resourcesFromString
@@ -359,7 +384,58 @@ grabMethod :: ((String -> app) -> app)
            -> (url -> String) -> url -> app
 grabMethod m t render url = m $ \method -> t method render url
 
-createRoutes :: String -> Name -> Name -> String -> [Resource] -> Q [Dec]
+-- | Template haskell code to convert a list of 'Resource's into appropriate
+-- declarations.
+--
+-- This function takes four arguments in addition to the list of resources.
+--
+-- * The first is the name of the data type for routes; this function will
+-- declare that data type with constructors according to the resources.
+--
+-- * The second is the datatype of an application. This depends on your
+-- underlying web server; in the case of WAI, you would use
+-- Network.Wai.Application. This is the value ultimately returned by the
+-- dispatch function, and must be the output type of the fourth argument.
+--
+-- * The third argument is the data type for arguments. This is a data type
+-- which you must define, and which will be available to all handler functions.
+--
+-- * The fourth is the trickiest; it is an explode function, designed to make
+-- writing of handler functions much simpler. It is a function with type
+-- signature:
+--     \"myapp -> args -> (url -> String) -> application\"
+--  where args, url and application are the 3rd, 1st and 2nd arguments,
+--  respectively.
+--
+--  This function produces 5 declarations (plus type signatures). For
+--  simplicity's sake, let's assume createRoutes was called as follows:
+--
+--  > createRoutes \"MyRoutes\" ''Application ''MyArgs \"myExplode\" resources
+--
+--  With:
+--
+--  > myExplode :: MyApp url -> MyArgs -> (url -> String) -> Application
+--
+--  * Defines the routes data type.
+--
+--  * parseMyRoutes :: [String] -> Either String MyRoutes
+--
+--  * renderMyRoutes :: MyRoutes -> [String]
+--
+--  * dispatchMyRoutes :: Application -> MyArgs -> String -> (MyRoutes ->
+--  String) -> MyRoutes -> Application. In this signature, the first argument
+--  is a handler for unsupported methods, and the third is the requested
+--  method.
+--
+--  * siteMyRoutes :: ((String -> Application) -> Application) -> Application
+--  -> MyArgs -> Site MyRoutes Application. The first argument is used to
+--  extract the method and the second handles unsupported methods.
+createRoutes :: String -- ^ name for routes data type
+             -> Name -- ^ type for application
+             -> Name -- ^ data type for arguments
+             -> String -- ^ explode function; converts to application
+             -> [Resource]
+             -> Q [Dec]
 createRoutes name app param explode res = do
     dt <- dataTypeDec name res
     pat <- parseDecType name param
