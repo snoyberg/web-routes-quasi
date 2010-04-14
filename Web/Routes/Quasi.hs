@@ -333,7 +333,10 @@ dispDec s r explode = do
                     let render' = o `AppE` VarE render `AppE` ConE (mkName constr)
                         hs'' = hs' `AppE` render'
                         hs''' = hs'' `AppE` VarE (last conArgs)
-                    return hs'''
+                        hs'''' = VarE (mkName explode) `AppE` hs'''
+                                                       `AppE` VarE param
+                                                       `AppE` VarE render
+                    return hs''''
         return $ Clause pat (NormalB b) []
     go' [] (SubSite _ _) = do
         n <- newName "arg"
