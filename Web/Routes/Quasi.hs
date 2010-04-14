@@ -422,14 +422,14 @@ siteDec s = do
 --
 --  * renderMyRoutes :: MyRoutes -> [String]
 --
---  * dispatchMyRoutes :: Application -> MyArgs -> String -> (MyRoutes ->
---  String) -> MyRoutes -> Application. In this signature, the first argument
+--  * dispatchMyRoutes :: (MyRoutes -> String) -> BlogRoutes -> String ->
+--  Application -> MyArgs -> Application. In this signature, the first argument
 --  is a handler for unsupported methods, and the third is the requested
 --  method.
 --
---  * siteMyRoutes :: ((String -> Application) -> Application) -> Application
---  -> MyArgs -> Site MyRoutes Application. The first argument is used to
---  extract the method and the second handles unsupported methods.
+--  * siteMyRoutes :: Site MyRoutes (String -> Application -> MyArgs ->
+--  Application). The first argument is the method and the second handles
+--  unsupported methods.
 createRoutes :: String -- ^ name for routes data type
              -> Name -- ^ type for application
              -> Name -- ^ data type for arguments
