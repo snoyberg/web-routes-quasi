@@ -23,24 +23,21 @@ data BlogArgs = BlogArgs
     , blogEntries :: [Entry]
     }
 
-newtype MyApp url = MyApp
-    { runMyApp :: BlogArgs -> (url -> String) -> Application
+newtype MyApp arg url = MyApp
+    { runMyApp :: arg -> (url -> String) -> Application
     }
 
 $(createRoutes "BlogRoutes" ''Application ''BlogArgs "runMyApp" [$parseRoutes|
 /                Home       GET
 /entry/$         EntryRoute GET
 /fake/#          Fake
-/static          Static     StaticRoutes siteStaticBlog
+/static          Static     StaticRoutes siteStatic staticPath
 |])
 
-siteStaticBlog :: BlogArgs -> Site StaticRoutes Application
-siteStaticBlog = siteStatic . staticPath
-
-handleFake :: Integer -> MyApp BlogRoutes
+handleFake :: Integer -> MyApp BlogArgs BlogRoutes
 handleFake = undefined
 
-getHome :: MyApp BlogRoutes
+getHome :: MyApp BlogArgs BlogRoutes
 getHome = MyApp $ \ba f _ -> return Response
     { status = Status302
     , responseHeaders = [(Location, S.pack $ f $ EntryRoute $ entrySlug
@@ -48,7 +45,7 @@ getHome = MyApp $ \ba f _ -> return Response
     , responseBody = Right $ fromLBS $ L.pack ""
     }
 
-getEntryRoute :: String -> MyApp BlogRoutes
+getEntryRoute :: String -> MyApp BlogArgs BlogRoutes
 getEntryRoute slug = MyApp $ \ba f _ ->
     case filter (\x -> entrySlug x == slug) $ blogEntries ba of
         [] -> return Response

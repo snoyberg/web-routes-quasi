@@ -10,15 +10,15 @@ import System.Directory
 data StaticRoutes = StaticRoutes { unStaticRoutes :: [String] }
     deriving (Show, Read, Eq)
 
-siteStatic :: FilePath -> Site StaticRoutes Application
-siteStatic fp = Site
-    { handleSite = \_ (StaticRoutes r) _ -> serveFile fp r
+siteStatic :: Site StaticRoutes (String -> Application -> FilePath -> Application)
+siteStatic = Site
+    { handleSite = \_ (StaticRoutes r) method badMethod fp -> serveFile method badMethod r fp
     , formatPathSegments = unStaticRoutes
     , parsePathSegments = Right . StaticRoutes
     }
 
-serveFile :: FilePath -> [String] -> IO Response
-serveFile fp s = do
+serveFile :: String -> Application -> [String] -> FilePath -> Application
+serveFile "GET" _ s fp _ = do
     let fp' = fp ++ concatMap ((:) '/') s
     e <- doesFileExist fp'
     if e
@@ -32,3 +32,4 @@ serveFile fp s = do
                 , responseHeaders = []
                 , responseBody = Right $ fromLBS $ pack "Not found"
                 }
+serveFile _ badMethod _ _ req = badMethod req

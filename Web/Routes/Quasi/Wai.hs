@@ -20,12 +20,12 @@ data WaiArgs = WaiArgs
     , wai404 :: Application
     }
 
-waiSite :: (((String -> Application) -> Application) -> Application -> args -> Site url Application)
+waiSite :: (Site url (String -> Application -> args -> Application))
         -> WaiArgs
         -> args
         -> Application
-waiSite s wa args req = do
-    let site = s (grabMethod wa) (waiBadMethod wa) args
+waiSite site wa args req = do
+    let method = readMethod $ requestMethod req
     let pieces = filter (not . null)
                $ decodePathInfo $ drop1Slash $ unpack $ pathInfo req
     print ("pieces", pieces)
@@ -34,10 +34,7 @@ waiSite s wa args req = do
         Right url ->
             let format u = waiApproot wa ++ encodePathInfo
                             (formatPathSegments site u)
-             in handleSite site format url req
-
-grabMethod :: WaiArgs -> (String -> Application) -> Application
-grabMethod wa f req = f (readMethod $ requestMethod req) req
+             in handleSite site format url method (waiBadMethod wa) args req
 
 readMethod :: Method -> String
 readMethod = unpack . methodToBS
