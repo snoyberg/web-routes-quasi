@@ -278,13 +278,13 @@ renderDec s res = FunD (mkName $ "render" ++ s) `fmap` mapM go res where
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
     mkBod ((i, SlurpPiece _):_) _ = return $ VarE $ mkName $ "var" ++ show i
 
-dispDecType :: String -> Name -> Name -> Q Dec
+dispDecType :: String -> Type -> Name -> Q Dec
 dispDecType s a p = do
     let url = ConT $ mkName s
         str = ConT ''String
         rend = ArrowT `AppT` url `AppT` str
-        ret1 = ArrowT `AppT` ConT p `AppT` ConT a -- param -> app
-        ret2 = ArrowT `AppT` ConT a `AppT` ret1 -- app -> ret1
+        ret1 = ArrowT `AppT` ConT p `AppT` a -- param -> app
+        ret2 = ArrowT `AppT` a `AppT` ret1 -- app -> ret1
         ret3 = ArrowT `AppT` str `AppT` ret2 -- String -> ret2 (method)
         ret4 = ArrowT `AppT` url `AppT` ret3 -- url -> ret3
         ret5 = ArrowT `AppT` rend `AppT` ret4 -- (url -> String) -> ret4
@@ -349,10 +349,10 @@ dispDec s r explode = do
         return $ n : ns
     go'' base arg = return $ base `AppE` VarE arg
 
-siteDecType :: String -> Name -> Name -> Q Dec
+siteDecType :: String -> Type -> Name -> Q Dec
 siteDecType s a p = do
-    let a1 = ArrowT `AppT` ConT p `AppT` ConT a -- args -> application
-        a2 = ArrowT `AppT` ConT a `AppT` a1 -- applications -> a1
+    let a1 = ArrowT `AppT` ConT p `AppT` a -- args -> application
+        a2 = ArrowT `AppT` a `AppT` a1 -- applications -> a1
         a3 = ArrowT `AppT` ConT ''String `AppT` a2 -- String -> a2 (method)
         ret = ConT ''Site `AppT` ConT (mkName s) `AppT` a3
     return $ SigD (mkName $ "site" ++ s) ret
@@ -431,7 +431,7 @@ siteDec s = do
 --  Application). The first argument is the method and the second handles
 --  unsupported methods.
 createRoutes :: String -- ^ name for routes data type
-             -> Name -- ^ type for application
+             -> Type -- ^ type for application
              -> Name -- ^ data type for arguments
              -> String -- ^ explode function; converts to application
              -> [Resource]
