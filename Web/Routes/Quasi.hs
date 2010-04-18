@@ -166,20 +166,13 @@ dataTypeDec name res = return $ DataD [] (mkName name) [] (map go res) claz
     go'' _ = []
     claz = [mkName "Show", mkName "Read", mkName "Eq"]
 
-parseDecType :: String -> Q Dec
-parseDecType s =
-    let str = ConT $ mkName "String"
-        eit = ConT $ mkName "Either"
-        ret = eit `AppT` str `AppT` (ConT $ mkName s)
-        strl = ListT `AppT` str
-        typ = ArrowT `AppT` strl `AppT` ret
-     in return $ SigD (mkName $ "parse" ++ s) typ
-
-parseDec :: String -> [Resource] -> Q Dec
-parseDec s r = do
+parseDec :: [Resource] -> Q Exp
+parseDec r = do
     final' <- final
     clauses <- mapM go r
-    return $ FunD (mkName $ "parse" ++ s) $ clauses ++ [final']
+    parse <- newName "parse"
+    let fun = FunD parse $ clauses ++ [final']
+    return $ LetE [fun] $ VarE parse
   where
     msg = LitE $ StringL "Could not parse URL"
     final = do
@@ -239,16 +232,12 @@ fmapEither :: (a -> b) -> Either x a -> Either x b
 fmapEither _ (Left x) = Left x
 fmapEither f (Right a) = Right $ f a
 
-renderDecType :: String -> Q Dec
-renderDecType s =
-    let str = ConT $ mkName "String"
-        strl = ListT `AppT` str
-        ret = ConT $ mkName s
-        typ = ArrowT `AppT` ret `AppT` strl
-     in return $ SigD (mkName $ "render" ++ s) typ
-
-renderDec :: String -> [Resource] -> Q Dec
-renderDec s res = FunD (mkName $ "render" ++ s) `fmap` mapM go res where
+renderDec :: [Resource] -> Q Exp
+renderDec res = do
+    name <- newName "render"
+    fun <- FunD name `fmap` mapM go res
+    return $ LetE [fun] $ VarE name
+  where
     go (Resource n ps h) = do
         let ps' = zip [1..] ps
         let pat = ConP (mkName n) $ mapMaybe go' ps' ++ lastPat h
@@ -278,27 +267,16 @@ renderDec s res = FunD (mkName $ "render" ++ s) `fmap` mapM go res where
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
     mkBod ((i, SlurpPiece _):_) _ = return $ VarE $ mkName $ "var" ++ show i
 
-dispDecType :: String -> Type -> Name -> Q Dec
-dispDecType s a p = do
-    let url = ConT $ mkName s
-        str = ConT ''String
-        rend = ArrowT `AppT` url `AppT` str
-        ret1 = ArrowT `AppT` ConT p `AppT` a -- param -> app
-        ret2 = ArrowT `AppT` a `AppT` ret1 -- app -> ret1
-        ret3 = ArrowT `AppT` str `AppT` ret2 -- String -> ret2 (method)
-        ret4 = ArrowT `AppT` url `AppT` ret3 -- url -> ret3
-        ret5 = ArrowT `AppT` rend `AppT` ret4 -- (url -> String) -> ret4
-    return $ SigD (mkName $ "dispatch" ++ s) ret5
-
-dispDec :: String -> [Resource] -> String -> Q Dec
-dispDec s r explode = do
+dispDec :: [Resource] -> String -> Q Exp
+dispDec r explode = do
     -- (url -> String) -> url -> String -> app -> param -> app
     badMethod <- newName "_badMethod"
     param <- newName "_param"
     method <- newName "_method"
     render <- newName "render"
     clauses <- mapM (go badMethod param method render) r
-    return $ FunD (mkName $ "dispatch" ++ s) $ clauses
+    name <- newName "dispatch"
+    return $ LetE [FunD name $ clauses] $ VarE name
   where
     go badMethod param method render (Resource constr ps handler) = do
         conArgs <- go' ps handler
@@ -364,32 +342,16 @@ siteDecType s a p = do
         ret = ConT ''Site `AppT` ConT (mkName s) `AppT` a3
     return $ SigD (mkName $ "site" ++ s) ret
 
-siteDec :: String -> Q Dec
-siteDec s = do
+siteDec :: String -> Exp -> Exp -> Exp -> Q Dec
+siteDec s parse render dispatch = do
     -- Site routes (((Method -> app) -> app) -> app -> param -> app)
-    body <- go
+    si <- [|Site|]
+    let body = si `AppE` dispatch
+                  `AppE` parse
+                  `AppE` render
     return $ FunD (mkName $ "site" ++ s)
         [ Clause [] (NormalB body) []
         ]
-  where
-    go = do
-        {-
-        m <- newName "getMethod"
-        bm <- newName "badMethod"
-        p <- newName "param"
-        -}
-        let hs = VarE (mkName $ "dispatch" ++ s)
-        {-
-                    `AppE` VarE bm
-                    `AppE` VarE p
-        gm <- [|grabMethod|]
-        let hs' = gm `AppE` VarE m `AppE` hs
-        -}
-        let hs' = hs
-        let fps = VarE (mkName $ "render" ++ s)
-        let pps = VarE (mkName $ "parse" ++ s)
-        si <- [|Site|]
-        return $ si `AppE` hs' `AppE` fps `AppE` pps
 
 -- | Template haskell code to convert a list of 'Resource's into appropriate
 -- declarations.
@@ -445,12 +407,9 @@ createRoutes :: String -- ^ name for routes data type
              -> Q [Dec]
 createRoutes name app param explode res = do
     dt <- dataTypeDec name res
-    pat <- parseDecType name
-    pa <- parseDec name res
-    ret <- renderDecType name
-    re <- renderDec name res
-    dit <- dispDecType name app param
-    di <- dispDec name res explode
+    pa <- parseDec res
+    re <- renderDec res
+    di <- dispDec res explode
     st <- siteDecType name app param
-    s <- siteDec name
-    return [dt, pat, pa, ret, re, dit, di, st, s]
+    s <- siteDec name pa re di
+    return [dt, st, s]
