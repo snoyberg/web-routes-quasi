@@ -302,8 +302,9 @@ dispDec s r explode = do
   where
     go badMethod param method render (Resource constr ps handler) = do
         conArgs <- go' ps handler
+        url <- newName "_url"
         let pat = [ VarP render
-                  , ConP (mkName constr) $ map VarP conArgs
+                  , AsP url $ ConP (mkName constr) $ map VarP conArgs
                   , VarP method
                   , VarP badMethod
                   , VarP param
@@ -312,13 +313,16 @@ dispDec s r explode = do
                 Single s' -> do
                     unexploded <- foldM go'' (VarE $ mkName s') conArgs
                     let exploded = VarE (mkName explode) `AppE` unexploded
-                    return $ exploded `AppE` VarE param `AppE` VarE render
+                    return $ exploded `AppE` VarE param
+                                      `AppE` VarE url
+                                      `AppE` VarE render
                 ByMethod methods -> do
                     matches <- forM methods $ \(m, f) -> do
                         let pat' = LitP $ StringL m
                         unexploded <- foldM go'' (VarE $ mkName f) conArgs
                         let exploded = VarE (mkName explode) `AppE` unexploded
                         let bod = exploded `AppE` VarE param
+                                           `AppE` VarE url
                                            `AppE` VarE render
                         return $ Match pat' (NormalB bod) []
                     let final =
@@ -328,15 +332,18 @@ dispDec s r explode = do
                     return $ CaseE (VarE method) $ matches ++ final
                 SubSite _ f getArg -> do
                     hs <- [|handleSite|]
-                    o <- [|(.)|]
-                    let render' = o `AppE` VarE render `AppE` ConE (mkName constr)
                     let disp = hs `AppE` VarE (mkName f)
-                        disp1 = disp `AppE` render'
-                        disp2 = disp1 `AppE` VarE (last conArgs)
-                        disp3 = disp2 `AppE` VarE method
-                        disp4 = disp3 `AppE` VarE badMethod
-                        disp5 = disp4 `AppE` (VarE (mkName getArg) `AppE` VarE param)
-                    return disp5
+                    o <- [|(.)|]
+                    let render' = InfixE (Just $ VarE render) o $ Just $ ConE $ mkName constr
+                    let param' = VarE (mkName getArg) `AppE` VarE param
+                    return $ disp
+                                `AppE` render'
+                                `AppE` VarE (last conArgs)
+                                `AppE` VarE method
+                                `AppE` VarE badMethod
+                                `AppE` param'
+                                --`AppE` VarE (mkName getArg)
+                                --`AppE` ConE (mkName constr)
         return $ Clause pat (NormalB b) []
     go' [] (SubSite _ _ _) = do
         n <- newName "arg"
