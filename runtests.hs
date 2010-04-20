@@ -10,39 +10,50 @@ import Data.ByteString.Lazy.Char8 (pack)
 import Data.ByteString.Char8 (unpack)
 import Web.Routes.Site
 import Web.Encodings
+import Language.Haskell.TH.Syntax
+
+data StaticArgs = StaticArgs
+
+getStaticArgs _ = StaticArgs
 
 data StaticRoutes = StaticRoutes { unStaticRoutes :: [String] }
     deriving (Show, Read, Eq)
 
-staticRoutes :: Int -> Site StaticRoutes Application
-staticRoutes _ = Site
+siteStatic :: Site StaticRoutes (String -> Application -> StaticArgs -> Application)
+siteStatic = Site
     undefined
-    Nothing
     unStaticRoutes
     (Right . StaticRoutes)
 
-$(createRoutes "MyRoutes" ''Application ''Int [$parseRoutes|
+createRoutes CreateRoutesSettings
+    { crRoutes = mkName "MyRoutes"
+    , crApplication = ConT ''Application
+    , crArgument = ConT ''Int
+    , crExplode = VarE $ mkName "id"
+    , crResources = [$parseRoutes|
 /                    Home       GET
 /user/#userid        User       GET PUT DELETE
-/static              Static     StaticRoutes staticRoutes
+/static              Static     StaticRoutes siteStatic getStaticArgs
 /foo/*slurp          Foo
 /bar/$barparam       Bar
-|])
+|]
+    , crSite = mkName "theSite"
+    }
 
-handleFoo :: Int -> (MyRoutes -> String) -> [String] -> Application
-handleFoo _ s a _ = return $ Response
+handleFoo :: [String] -> Int -> MyRoutes -> (MyRoutes -> String) -> Application
+handleFoo a _ _ s _ = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack $ show ("in foo", s $ User 78, a)
 
-handleBar :: Int -> (MyRoutes -> String) -> String -> Application
-handleBar _ s a _ = return $ Response
+handleBar :: String -> Int -> MyRoutes -> (MyRoutes -> String) -> Application
+handleBar a _ _ s _ = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack $ show ("in bar", s $ User 78, a)
 
-getHome :: Int -> (MyRoutes -> String) -> Application
-getHome i s _ = return $ Response
+getHome :: Int -> MyRoutes -> (MyRoutes -> String) -> Application
+getHome i _ s _ = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack $ show
@@ -50,8 +61,8 @@ getHome i s _ = return $ Response
                         , s $ Foo ["bar baz+bin"]
                         ]
 
-getUser :: Int -> (MyRoutes -> String) -> Integer -> Application
-getUser i s uid _ = return $ Response
+getUser :: Integer -> Int -> MyRoutes -> (MyRoutes -> String) -> Application
+getUser uid i _ s _ = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack $ unlines
@@ -61,10 +72,10 @@ getUser i s uid _ = return $ Response
                         , s Home
                         ]
 
-putUser :: Int -> (MyRoutes -> String) -> Integer -> Application
+putUser :: Integer -> Int -> MyRoutes -> (MyRoutes -> String) -> Application
 putUser = undefined
 
-deleteUser :: Int -> (MyRoutes -> String) -> Integer -> Application
+deleteUser :: Integer -> Int -> MyRoutes -> (MyRoutes -> String) -> Application
 deleteUser = undefined
 
 msg404 :: String -> Application
@@ -79,27 +90,32 @@ badMethod _ = return $ Response
                     []
                     $ Right $ fromLBS $ pack "Bad method"
 
+{-
 site :: Site MyRoutes Application
 site = siteMyRoutes getMethod badMethod 20
+-}
 
 getMethod :: (String -> Application) -> Application
 getMethod m = m "GET" -- FIXME
 
 main :: IO ()
 main = do
-    quickCheck $ \s -> parseMyRoutes 20 (renderMyRoutes 20 s) == Right s
+    let parseMyRoutes = parsePathSegments theSite
+    let renderMyRoutes = formatPathSegments theSite
+
+    quickCheck $ \s -> parseMyRoutes (renderMyRoutes s) == Right s
 
     --run $ dispatchMyRoutes badMethod 20 GET (show . renderMyRoutes 20) Home
 
     print $ User 5
-    print $ parseMyRoutes 20 ["user", "6"]
-    print $ parseMyRoutes 20 ["invalid", "route"]
-    print $ parseMyRoutes 20 ["foo", "six", "seven", "8"]
-    print $ parseMyRoutes 20 ["static", "foo", "six", "seven", "8"]
-    print $ renderMyRoutes 20 Home
-    print $ renderMyRoutes 20 $ User 6
-    print $ renderMyRoutes 20 $ Foo ["bar baz", "bin"]
-    print $ parseMyRoutes 20 ["user", "six"]
+    print $ parseMyRoutes ["user", "6"]
+    print $ parseMyRoutes ["invalid", "route"]
+    print $ parseMyRoutes ["foo", "six", "seven", "8"]
+    print $ parseMyRoutes ["static", "foo", "six", "seven", "8"]
+    print $ renderMyRoutes Home
+    print $ renderMyRoutes $ User 6
+    print $ renderMyRoutes $ Foo ["bar baz", "bin"]
+    print $ parseMyRoutes ["user", "six"]
 
     --run 3000 $ waiSite site --"http://localhost:3000"
 
