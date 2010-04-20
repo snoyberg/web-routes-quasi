@@ -5,6 +5,7 @@ module Web.Routes.Quasi
       Resource (..)
     , Handler (..)
     , Piece (..)
+    , QuasiSite (..)
       -- * Quasi quoter
     , parseRoutes
       -- * Template haskell
@@ -56,6 +57,19 @@ data Piece = StaticPiece String
            | IntPiece String
            | SlurpPiece String
     deriving (Read, Show, Eq, Data, Typeable)
+
+data QuasiSite app surl sarg murl marg = QuasiSite
+    { quasiDispatch :: (murl -> String)
+                    -> surl
+                    -> (surl -> murl)
+                    -> marg
+                    -> (marg -> sarg)
+                    -> String -- ^ method
+                    -> app -- ^ bad method handler
+                    -> app
+    , quasiRender :: surl -> [String]
+    , quasiParse :: [String] -> Maybe surl
+    }
 
 isStatic :: Piece -> Bool
 isStatic (StaticPiece _) = True
@@ -180,23 +194,22 @@ parseDec set = do
     let fun = FunD parse $ clauses ++ [final']
     return $ LetE [fun] $ VarE parse
   where
-    msg = LitE $ StringL "Could not parse URL"
     final = do
-        le <- [|Left|]
-        return $ Clause [WildP] (NormalB $ AppE le msg) []
+        no <- [|Nothing|]
+        return $ Clause [WildP] (NormalB no) []
     go (Resource n ps h) = do
         let ps' = zip [1..] ps
         let pat = mkPat ps' h
         bod <- foldM go' (ConE $ mkName n) ps'
         bod' <- case h of
                     SubSite _ f _ -> do
-                        parse <- [|parsePathSegments|]
+                        parse <- [|quasiParse|]
                         let parse' = parse `AppE` VarE (mkName f)
                         let rhs = parse' `AppE` VarE (mkName "var0")
-                        fm <- [|fmapEither|]
+                        fm <- [|fmap|]
                         return $ fm `AppE` bod `AppE` rhs
                     _ -> do
-                        ri <- [|Right|]
+                        ri <- [|Just|]
                         return $ AppE ri bod
         checkInts' <- checkInts ps'
         return $ Clause [pat]
@@ -254,7 +267,7 @@ renderDec set = do
     go' (_, StaticPiece _) = Nothing
     go' (i, _) = Just $ VarP $ mkName $ "var" ++ show (i :: Int)
     mkBod [] (SubSite _ f _) = do
-        format <- [|formatPathSegments|]
+        format <- [|quasiRender|]
         let format' = format `AppE` VarE (mkName f)
         return $ format' `AppE` VarE (mkName "var0")
     mkBod [] _ = lift ([] :: [String])
@@ -275,39 +288,52 @@ renderDec set = do
 
 dispDec :: CreateRoutesSettings -> Q Exp
 dispDec set = do
-    -- (url -> String) -> url -> String -> app -> param -> app
-    badMethod <- newName "_badMethod"
-    param <- newName "_param"
-    method <- newName "_method"
-    render <- newName "render"
-    clauses <- mapM (go badMethod param method render) $ crResources set
+    mrender <- newName "_mrender"
+    tomurl <- newName "tomurl"
+    marg <- newName "marg"
+    tosarg <- newName "tosarg"
+    method <- newName "method"
+    badMethod <- newName "badMethod"
+    clauses <- mapM (go mrender tomurl marg tosarg method badMethod)
+             $ crResources set
     name <- newName "dispatch"
     return $ LetE [FunD name $ clauses] $ VarE name
   where
-    go badMethod param method render (Resource constr ps handler) = do
+    go mrender tomurl marg tosarg method badMethod
+       (Resource constr ps handler) = do
         conArgs <- go' ps handler
         url <- newName "_url"
-        let pat = [ VarP render
+        let pat = [ VarP mrender
                   , AsP url $ ConP (mkName constr) $ map VarP conArgs
+                  , VarP tomurl
+                  , VarP marg
+                  , VarP tosarg
                   , VarP method
                   , VarP badMethod
-                  , VarP param
                   ]
         b <- case handler of
                 Single s' -> do
                     unexploded <- foldM go'' (VarE $ mkName s') conArgs
                     let exploded = crExplode set `AppE` unexploded
-                    return $ exploded `AppE` VarE param
-                                      `AppE` VarE url
-                                      `AppE` VarE render
+                    return $ exploded
+                                `AppE` VarE mrender
+                                `AppE` VarE url
+                                `AppE` VarE tomurl
+                                `AppE` VarE marg
+                                `AppE` VarE tosarg
+                                `AppE` VarE method
                 ByMethod methods -> do
                     matches <- forM methods $ \(m, f) -> do
                         let pat' = LitP $ StringL m
                         unexploded <- foldM go'' (VarE $ mkName f) conArgs
                         let exploded = (crExplode set) `AppE` unexploded
-                        let bod = exploded `AppE` VarE param
-                                           `AppE` VarE url
-                                           `AppE` VarE render
+                        let bod = exploded
+                                `AppE` VarE mrender
+                                `AppE` VarE url
+                                `AppE` VarE tomurl
+                                `AppE` VarE marg
+                                `AppE` VarE tosarg
+                                `AppE` VarE method
                         return $ Match pat' (NormalB bod) []
                     let final =
                             if length methods == 4
@@ -315,22 +341,17 @@ dispDec set = do
                                 else [Match WildP (NormalB $ VarE badMethod) []]
                     return $ CaseE (VarE method) $ matches ++ final
                 SubSite _ f getArg -> do
-                    hs <- [|handleSite|]
-                    let disp = hs `AppE` VarE (mkName f)
+                    qd <- [|quasiDispatch|]
+                    let disp = qd `AppE` VarE (mkName f)
                     o <- [|(.)|]
-                    let render' = InfixE (Just $ VarE render) o $ Just $ ConE $ mkName constr
-                    let param' = TupE
-                                    [ VarE param
-                                    , VarE $ mkName getArg
-                                    , ConE $ mkName constr
-                                    , VarE render
-                                    ]
                     return $ disp
-                                `AppE` render'
-                                `AppE` VarE (last conArgs)
-                                `AppE` VarE method
-                                `AppE` VarE badMethod
-                                `AppE` param'
+                        `AppE` VarE mrender
+                        `AppE` VarE (last conArgs)
+                        `AppE` InfixE (Just $ VarE tomurl) o (Just $ ConE $ mkName constr)
+                        `AppE` VarE marg
+                        `AppE` InfixE (Just $ VarE $ mkName getArg) o (Just $ VarE tosarg)
+                        `AppE` VarE method
+                        `AppE` VarE badMethod
         return $ Clause pat (NormalB b) []
     go' [] (SubSite _ _ _) = do
         n <- newName "arg"
@@ -345,17 +366,20 @@ dispDec set = do
 
 siteDecType :: CreateRoutesSettings -> Q Dec
 siteDecType set = do
-    let a1 = ArrowT `AppT` crArgument set
-                    `AppT` crApplication set -- args -> application
-        a2 = ArrowT `AppT` crApplication set `AppT` a1 -- applications -> a1
-        a3 = ArrowT `AppT` ConT ''String `AppT` a2 -- String -> a2 (method)
-        ret = ConT ''Site `AppT` (ConT $ crRoutes set) `AppT` a3
-    return $ SigD (crSite set) ret
+    let marg = mkName "marg"
+        murl = mkName "murl"
+    return $ SigD (crSite set) $ ForallT
+        [PlainTV marg, PlainTV murl]
+        [] $ ConT ''QuasiSite
+                `AppT` crApplication set
+                `AppT` ConT (crRoutes set)
+                `AppT` crArgument set
+                `AppT` VarT murl
+                `AppT` VarT marg
 
 siteDec :: CreateRoutesSettings -> Exp -> Exp -> Exp -> Q Dec
 siteDec set dispatch render parse = do
-    -- Site routes (((Method -> app) -> app) -> app -> param -> app)
-    si <- [|Site|]
+    si <- [|QuasiSite|]
     let body = si `AppE` dispatch
                   `AppE` render
                   `AppE` parse

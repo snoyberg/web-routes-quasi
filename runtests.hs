@@ -25,19 +25,14 @@ getStaticArgs _ = StaticArgs
 data StaticRoutes = StaticRoutes { unStaticRoutes :: [String] }
     deriving (Show, Read, Eq)
 
-siteStatic :: Site StaticRoutes
-           ( String
-          -> Application
-          -> (margs, margs -> StaticArgs, StaticRoutes -> mroutes, mroutes -> String)
-          -> Application
-           )
-siteStatic = Site
+siteStatic :: QuasiSite Application StaticRoutes StaticArgs murl marg
+siteStatic = QuasiSite
     undefined
     unStaticRoutes
-    (Right . StaticRoutes)
+    (Just . StaticRoutes)
 
-type Explode routes = Int -> routes -> (routes -> String) -> Application
-explode :: Explode r -> Explode r
+type Explode surl murl marg = (murl -> String) -> surl -> (surl -> murl) -> marg -> (marg -> Int) -> String -> Application
+explode :: Explode surl murl marg -> Explode surl murl marg
 explode = id
 
 createRoutes' CreateRoutesSettings
@@ -55,42 +50,42 @@ createRoutes' CreateRoutesSettings
     , crSite = mkName "theSite"
     }
 
-handleFoo :: [String] -> Int -> MyRoutes -> (MyRoutes -> String) -> Application
-handleFoo a _ _ s _ = return $ Response
+handleFoo :: [String] -> Explode MyRoutes murl marg
+handleFoo a mrender _surl tomurl _marg _tosarg _method _req = return $ Response
                     Status200
                     []
-                    $ Right $ fromLBS $ pack $ show ("in foo", s $ User 78, a)
+                    $ Right $ fromLBS $ pack $ show ("in foo", mrender $ tomurl $ User 78, a)
 
-handleBar :: String -> Int -> MyRoutes -> (MyRoutes -> String) -> Application
-handleBar a _ _ s _ = return $ Response
+handleBar :: String -> Explode MyRoutes murl marg
+handleBar a mrender _surl tomurl marg tosarg _method _req = return $ Response
                     Status200
                     []
-                    $ Right $ fromLBS $ pack $ show ("in bar", s $ User 78, a)
+                    $ Right $ fromLBS $ pack $ show ("in bar", mrender $ tomurl $ User 78, a)
 
-getHome :: Int -> MyRoutes -> (MyRoutes -> String) -> Application
-getHome i _ s _ = return $ Response
+getHome :: Explode MyRoutes murl marg
+getHome mrender _surl tomurl marg tosarg _method _req = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack $ show
-                        [ show i
-                        , s $ Foo ["bar baz+bin"]
+                        [ show $ tosarg marg
+                        , mrender $ tomurl $ Foo ["bar baz+bin"]
                         ]
 
-getUser :: Integer -> Int -> MyRoutes -> (MyRoutes -> String) -> Application
-getUser uid i _ s _ = return $ Response
+getUser :: Integer -> Explode MyRoutes murl marg
+getUser uid mrender _surl tomurl marg tosarg _method _req = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack $ unlines
                         [ "Getting user"
                         , show uid
-                        , show i
-                        , s Home
+                        , show $ tosarg marg
+                        , mrender $ tomurl Home
                         ]
 
-putUser :: Integer -> Int -> MyRoutes -> (MyRoutes -> String) -> Application
+putUser :: Integer -> Explode MyRoutes murl marg
 putUser = undefined
 
-deleteUser :: Integer -> Int -> MyRoutes -> (MyRoutes -> String) -> Application
+deleteUser :: Integer -> Explode MyRoutes murl marg
 deleteUser = undefined
 
 msg404 :: String -> Application
@@ -109,10 +104,10 @@ badMethod _ = return $ Response
 
 main :: IO ()
 main = do
-    let parseMyRoutes = parsePathSegments theSite
-    let renderMyRoutes = formatPathSegments theSite
+    let parseMyRoutes = quasiParse theSite
+    let renderMyRoutes = quasiRender theSite
 
-    quickCheck $ \s -> parseMyRoutes (renderMyRoutes s) == Right s
+    quickCheck $ \s -> parseMyRoutes (renderMyRoutes s) == Just s
 
     --run $ dispatchMyRoutes badMethod 20 GET (show . renderMyRoutes 20) Home
 
