@@ -19,7 +19,15 @@ getStaticArgs _ = StaticArgs
 data StaticRoutes = StaticRoutes { unStaticRoutes :: [String] }
     deriving (Show, Read, Eq)
 
-siteStatic :: Site StaticRoutes (String -> Application -> StaticArgs -> Application)
+siteStatic :: Site StaticRoutes
+           ( String
+          -> Application
+          -> StaticArgs
+          -> (StaticRoutes -> mroutes)
+          -> (mroutes -> String)
+          -> master
+          -> Application
+           )
 siteStatic = Site
     undefined
     unStaticRoutes

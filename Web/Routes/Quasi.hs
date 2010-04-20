@@ -324,8 +324,9 @@ dispDec set = do
                                 `AppE` VarE method
                                 `AppE` VarE badMethod
                                 `AppE` param'
-                                --`AppE` VarE (mkName getArg)
-                                --`AppE` ConE (mkName constr)
+                                `AppE` ConE (mkName constr)
+                                `AppE` VarE render
+                                `AppE` VarE param
         return $ Clause pat (NormalB b) []
     go' [] (SubSite _ _ _) = do
         n <- newName "arg"
