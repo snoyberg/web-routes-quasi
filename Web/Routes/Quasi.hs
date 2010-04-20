@@ -5,7 +5,10 @@ module Web.Routes.Quasi
       Resource (..)
     , Handler (..)
     , Piece (..)
+      -- * Quasi site
     , QuasiSite (..)
+    , quasiFromSite
+    , quasiToSite
       -- * Quasi quoter
     , parseRoutes
       -- * Template haskell
@@ -64,11 +67,36 @@ data QuasiSite app surl sarg murl marg = QuasiSite
                     -> (surl -> murl)
                     -> marg
                     -> (marg -> sarg)
-                    -> String -- ^ method
                     -> app -- ^ bad method handler
+                    -> String -- ^ method
                     -> app
     , quasiRender :: surl -> [String]
     , quasiParse :: [String] -> Maybe surl
+    }
+
+quasiFromSite :: Site surl app -> QuasiSite app surl () murl marg
+quasiFromSite (Site dispatch render parse) = QuasiSite
+    { quasiDispatch = \mrender surl constr _ _ _ _ ->
+                        dispatch (mrender . constr) surl
+    , quasiRender = render
+    , quasiParse = either (const Nothing) Just . parse
+    }
+
+quasiToSite :: QuasiSite app surl sarg surl sarg
+            -> ((String -> app) -> app) -- ^ grab method
+            -> app -- ^ bad method
+            -> sarg
+            -> Site surl app
+quasiToSite (QuasiSite dispatch render parse) grabMethod badMethod sarg = Site
+    { handleSite = \rend surl -> grabMethod (dispatch
+                                    rend
+                                    surl
+                                    id
+                                    sarg
+                                    id
+                                    badMethod)
+    , formatPathSegments = render
+    , parsePathSegments = maybe (Left "Invalid URL") Right . parse
     }
 
 isStatic :: Piece -> Bool
@@ -247,10 +275,6 @@ isInt [] = False
 isInt ('-':rest) = all isDigit rest
 isInt x = all isDigit x
 
-fmapEither :: (a -> b) -> Either x a -> Either x b
-fmapEither _ (Left x) = Left x
-fmapEither f (Right a) = Right $ f a
-
 renderDec :: CreateRoutesSettings -> Q Exp
 renderDec set = do
     name <- newName "render"
@@ -308,8 +332,8 @@ dispDec set = do
                   , VarP tomurl
                   , VarP marg
                   , VarP tosarg
-                  , VarP method
                   , VarP badMethod
+                  , VarP method
                   ]
         b <- case handler of
                 Single s' -> do
@@ -350,8 +374,8 @@ dispDec set = do
                         `AppE` InfixE (Just $ VarE tomurl) o (Just $ ConE $ mkName constr)
                         `AppE` VarE marg
                         `AppE` InfixE (Just $ VarE $ mkName getArg) o (Just $ VarE tosarg)
-                        `AppE` VarE method
                         `AppE` VarE badMethod
+                        `AppE` VarE method
         return $ Clause pat (NormalB b) []
     go' [] (SubSite _ _ _) = do
         n <- newName "arg"
