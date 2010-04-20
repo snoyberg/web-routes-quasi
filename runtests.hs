@@ -1,11 +1,16 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+module Main
+    ( main
+    , waiSite
+    ) where
+
 import Web.Routes.Quasi
 import Test.QuickCheck
 import Control.Applicative
 import Network.Wai
 import Network.Wai.Enumerator
-import Network.Wai.Handler.SimpleServer
+--import Network.Wai.Handler.SimpleServer
 import Data.ByteString.Lazy.Char8 (pack)
 import Data.ByteString.Char8 (unpack)
 import Web.Routes.Site
@@ -14,6 +19,7 @@ import Language.Haskell.TH.Syntax
 
 data StaticArgs = StaticArgs
 
+getStaticArgs :: Int -> StaticArgs
 getStaticArgs _ = StaticArgs
 
 data StaticRoutes = StaticRoutes { unStaticRoutes :: [String] }
@@ -29,14 +35,6 @@ siteStatic = Site
     undefined
     unStaticRoutes
     (Right . StaticRoutes)
-
-type SubExplode sa sr ma mr = sa
-                           -> (sr -> mr)
-                           -> (mr -> String)
-                           -> ma
-                           -> Application
-subexplode :: SubExplode sa sr ma mr -> SubExplode sa sr ma mr
-subexplode = id
 
 type Explode routes = Int -> routes -> (routes -> String) -> Application
 explode :: Explode r -> Explode r
@@ -101,19 +99,13 @@ msg404 s _ = return $ Response
                     []
                     $ Right $ fromLBS $ pack $ "Not found: " ++ s
 
+{-
 badMethod :: Application
 badMethod _ = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack "Bad method"
-
-{-
-site :: Site MyRoutes Application
-site = siteMyRoutes getMethod badMethod 20
 -}
-
-getMethod :: (String -> Application) -> Application
-getMethod m = m "GET" -- FIXME
 
 main :: IO ()
 main = do
