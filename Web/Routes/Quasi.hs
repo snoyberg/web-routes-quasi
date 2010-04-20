@@ -9,6 +9,7 @@ module Web.Routes.Quasi
     , parseRoutes
       -- * Template haskell
     , createRoutes
+    , CreateRoutesSettings (..)
     ) where
 
 import Data.Char
@@ -18,6 +19,7 @@ import Data.Data
 import Data.Maybe
 import Control.Monad
 import Web.Routes.Site
+import Control.Applicative ((<$>))
 
 -- | A single resource pattern.
 --
@@ -152,24 +154,26 @@ liftHandler (SubSite x y z) = do
     z' <- lift z
     return $ c `AppE` x' `AppE` y' `AppE` z'
 
-dataTypeDec :: String -> [Resource] -> Q Dec
-dataTypeDec name res = return $ DataD [] (mkName name) [] (map go res) claz
+dataTypeDec :: CreateRoutesSettings -> Q Dec
+dataTypeDec set =
+    return $ DataD [] (crRoutes set) []
+             (map go $ crResources set) claz
   where
     go (Resource n pieces h) = NormalC (mkName n)
                              $ mapMaybe go' pieces
                             ++ go'' h
-    go' (StringPiece _) = Just (NotStrict, ConT $ mkName "String")
-    go' (IntPiece _) = Just (NotStrict, ConT $ mkName "Integer")
-    go' (SlurpPiece _) = Just (NotStrict, AppT ListT $ ConT $ mkName "String")
+    go' (StringPiece _) = Just (NotStrict, ConT ''String)
+    go' (IntPiece _) = Just (NotStrict, ConT ''Integer)
+    go' (SlurpPiece _) = Just (NotStrict, AppT ListT $ ConT ''String)
     go' _ = Nothing
     go'' (SubSite t _ _) = [(NotStrict, ConT $ mkName t)]
     go'' _ = []
-    claz = [mkName "Show", mkName "Read", mkName "Eq"]
+    claz = [''Show, ''Read, ''Eq]
 
-parseDec :: [Resource] -> Q Exp
-parseDec r = do
+parseDec :: CreateRoutesSettings -> Q Exp
+parseDec set = do
     final' <- final
-    clauses <- mapM go r
+    clauses <- mapM go $ crResources set
     parse <- newName "parse"
     let fun = FunD parse $ clauses ++ [final']
     return $ LetE [fun] $ VarE parse
@@ -232,10 +236,10 @@ fmapEither :: (a -> b) -> Either x a -> Either x b
 fmapEither _ (Left x) = Left x
 fmapEither f (Right a) = Right $ f a
 
-renderDec :: [Resource] -> Q Exp
-renderDec res = do
+renderDec :: CreateRoutesSettings -> Q Exp
+renderDec set = do
     name <- newName "render"
-    fun <- FunD name `fmap` mapM go res
+    fun <- FunD name <$> mapM go (crResources set)
     return $ LetE [fun] $ VarE name
   where
     go (Resource n ps h) = do
@@ -267,14 +271,14 @@ renderDec res = do
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
     mkBod ((i, SlurpPiece _):_) _ = return $ VarE $ mkName $ "var" ++ show i
 
-dispDec :: [Resource] -> String -> Q Exp
-dispDec r explode = do
+dispDec :: CreateRoutesSettings -> Q Exp
+dispDec set = do
     -- (url -> String) -> url -> String -> app -> param -> app
     badMethod <- newName "_badMethod"
     param <- newName "_param"
     method <- newName "_method"
     render <- newName "render"
-    clauses <- mapM (go badMethod param method render) r
+    clauses <- mapM (go badMethod param method render) $ crResources set
     name <- newName "dispatch"
     return $ LetE [FunD name $ clauses] $ VarE name
   where
@@ -290,7 +294,7 @@ dispDec r explode = do
         b <- case handler of
                 Single s' -> do
                     unexploded <- foldM go'' (VarE $ mkName s') conArgs
-                    let exploded = VarE (mkName explode) `AppE` unexploded
+                    let exploded = crExplode set `AppE` unexploded
                     return $ exploded `AppE` VarE param
                                       `AppE` VarE url
                                       `AppE` VarE render
@@ -298,7 +302,7 @@ dispDec r explode = do
                     matches <- forM methods $ \(m, f) -> do
                         let pat' = LitP $ StringL m
                         unexploded <- foldM go'' (VarE $ mkName f) conArgs
-                        let exploded = VarE (mkName explode) `AppE` unexploded
+                        let exploded = (crExplode set) `AppE` unexploded
                         let bod = exploded `AppE` VarE param
                                            `AppE` VarE url
                                            `AppE` VarE render
@@ -334,22 +338,23 @@ dispDec r explode = do
         return $ n : ns
     go'' base arg = return $ base `AppE` VarE arg
 
-siteDecType :: String -> Type -> Name -> Q Dec
-siteDecType s a p = do
-    let a1 = ArrowT `AppT` ConT p `AppT` a -- args -> application
-        a2 = ArrowT `AppT` a `AppT` a1 -- applications -> a1
+siteDecType :: CreateRoutesSettings -> Q Dec
+siteDecType set = do
+    let a1 = ArrowT `AppT` crArgument set
+                    `AppT` crApplication set -- args -> application
+        a2 = ArrowT `AppT` crApplication set `AppT` a1 -- applications -> a1
         a3 = ArrowT `AppT` ConT ''String `AppT` a2 -- String -> a2 (method)
-        ret = ConT ''Site `AppT` ConT (mkName s) `AppT` a3
-    return $ SigD (mkName $ "site" ++ s) ret
+        ret = ConT ''Site `AppT` (ConT $ crRoutes set) `AppT` a3
+    return $ SigD (crSite set) ret
 
-siteDec :: String -> Exp -> Exp -> Exp -> Q Dec
-siteDec s parse render dispatch = do
+siteDec :: CreateRoutesSettings -> Exp -> Exp -> Exp -> Q Dec
+siteDec set dispatch render parse = do
     -- Site routes (((Method -> app) -> app) -> app -> param -> app)
     si <- [|Site|]
     let body = si `AppE` dispatch
-                  `AppE` parse
                   `AppE` render
-    return $ FunD (mkName $ "site" ++ s)
+                  `AppE` parse
+    return $ FunD (crSite set)
         [ Clause [] (NormalB body) []
         ]
 
@@ -399,17 +404,21 @@ siteDec s parse render dispatch = do
 --  * siteMyRoutes :: Site MyRoutes (String -> Application -> MyArgs ->
 --  Application). The first argument is the method and the second handles
 --  unsupported methods.
-createRoutes :: String -- ^ name for routes data type
-             -> Type -- ^ type for application
-             -> Name -- ^ data type for arguments
-             -> String -- ^ explode function; converts to application
-             -> [Resource]
-             -> Q [Dec]
-createRoutes name app param explode res = do
-    dt <- dataTypeDec name res
-    pa <- parseDec res
-    re <- renderDec res
-    di <- dispDec res explode
-    st <- siteDecType name app param
-    s <- siteDec name pa re di
+createRoutes :: CreateRoutesSettings -> Q [Dec]
+createRoutes set = do
+    dt <- dataTypeDec set
+    pa <- parseDec set
+    re <- renderDec set
+    di <- dispDec set
+    st <- siteDecType set
+    s <- siteDec set di re pa
     return [dt, st, s]
+
+data CreateRoutesSettings = CreateRoutesSettings
+    { crRoutes :: Name
+    , crApplication :: Type
+    , crArgument :: Type
+    , crExplode :: Exp
+    , crResources :: [Resource]
+    , crSite :: Name
+    }
