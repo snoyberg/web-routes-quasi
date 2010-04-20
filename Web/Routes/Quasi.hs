@@ -313,15 +313,15 @@ renderDec set = do
 dispDec :: CreateRoutesSettings -> Q Exp
 dispDec set = do
     mrender <- newName "_mrender"
-    tomurl <- newName "tomurl"
-    marg <- newName "marg"
-    tosarg <- newName "tosarg"
-    method <- newName "method"
-    badMethod <- newName "badMethod"
+    tomurl <- newName "_tomurl"
+    marg <- newName "_marg"
+    tosarg <- newName "_tosarg"
+    method <- newName "_method"
+    badMethod <- newName "_badMethod"
     clauses <- mapM (go mrender tomurl marg tosarg method badMethod)
              $ crResources set
     name <- newName "dispatch"
-    return $ LetE [FunD name $ clauses] $ VarE name
+    return $ LetE [FunD name clauses] $ VarE name
   where
     go mrender tomurl marg tosarg method badMethod
        (Resource constr ps handler) = do
@@ -345,18 +345,20 @@ dispDec set = do
                                 `AppE` VarE tomurl
                                 `AppE` VarE marg
                                 `AppE` VarE tosarg
+                                `AppE` VarE badMethod
                                 `AppE` VarE method
                 ByMethod methods -> do
                     matches <- forM methods $ \(m, f) -> do
                         let pat' = LitP $ StringL m
                         unexploded <- foldM go'' (VarE $ mkName f) conArgs
-                        let exploded = (crExplode set) `AppE` unexploded
+                        let exploded = crExplode set `AppE` unexploded
                         let bod = exploded
                                 `AppE` VarE mrender
                                 `AppE` VarE url
                                 `AppE` VarE tomurl
                                 `AppE` VarE marg
                                 `AppE` VarE tosarg
+                                `AppE` VarE badMethod
                                 `AppE` VarE method
                         return $ Match pat' (NormalB bod) []
                     let final =
@@ -368,14 +370,18 @@ dispDec set = do
                     qd <- [|quasiDispatch|]
                     let disp = qd `AppE` VarE (mkName f)
                     o <- [|(.)|]
+                    let tomurl' = InfixE (Just $ VarE tomurl) o
+                                $ Just $ ConE $ mkName constr
+                    let tosarg' = InfixE (Just $ VarE $ mkName getArg) o
+                                $ Just $ VarE tosarg
                     return $ disp
-                        `AppE` VarE mrender
-                        `AppE` VarE (last conArgs)
-                        `AppE` InfixE (Just $ VarE tomurl) o (Just $ ConE $ mkName constr)
-                        `AppE` VarE marg
-                        `AppE` InfixE (Just $ VarE $ mkName getArg) o (Just $ VarE tosarg)
-                        `AppE` VarE badMethod
-                        `AppE` VarE method
+                                `AppE` VarE mrender
+                                `AppE` VarE (last conArgs)
+                                `AppE` tomurl'
+                                `AppE` VarE marg
+                                `AppE` tosarg'
+                                `AppE` VarE badMethod
+                                `AppE` VarE method
         return $ Clause pat (NormalB b) []
     go' [] (SubSite _ _ _) = do
         n <- newName "arg"
