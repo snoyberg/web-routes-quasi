@@ -33,11 +33,23 @@ siteStatic = Site
     unStaticRoutes
     (Right . StaticRoutes)
 
-createRoutes CreateRoutesSettings
+type SubExplode sa sr ma mr = sa
+                           -> (sr -> mr)
+                           -> (mr -> String)
+                           -> ma
+                           -> Application
+subexplode :: SubExplode sa sr ma mr -> SubExplode sa sr ma mr
+subexplode = id
+
+type Explode routes = Int -> routes -> (routes -> String) -> Application
+explode :: Explode r -> Explode r
+explode = id
+
+createRoutes' CreateRoutesSettings
     { crRoutes = mkName "MyRoutes"
     , crApplication = ConT ''Application
     , crArgument = ConT ''Int
-    , crExplode = VarE $ mkName "id"
+    , crExplode = VarE $ mkName "explode"
     , crResources = [$parseRoutes|
 /                    Home       GET
 /user/#userid        User       GET PUT DELETE

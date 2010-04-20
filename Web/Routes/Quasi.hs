@@ -9,7 +9,9 @@ module Web.Routes.Quasi
     , parseRoutes
       -- * Template haskell
     , createRoutes
+    , createRoutes'
     , CreateRoutesSettings (..)
+    , CreateRoutesResult (..)
     ) where
 
 import Data.Char
@@ -405,7 +407,7 @@ siteDec set dispatch render parse = do
 --  * siteMyRoutes :: Site MyRoutes (String -> Application -> MyArgs ->
 --  Application). The first argument is the method and the second handles
 --  unsupported methods.
-createRoutes :: CreateRoutesSettings -> Q [Dec]
+createRoutes :: CreateRoutesSettings -> Q CreateRoutesResult
 createRoutes set = do
     dt <- dataTypeDec set
     pa <- parseDec set
@@ -413,7 +415,11 @@ createRoutes set = do
     di <- dispDec set
     st <- siteDecType set
     s <- siteDec set di re pa
-    return [dt, st, s]
+    return CreateRoutesResult
+        { decRoutes = dt
+        , decSiteType = st
+        , decSite = s
+        }
 
 data CreateRoutesSettings = CreateRoutesSettings
     { crRoutes :: Name
@@ -423,3 +429,14 @@ data CreateRoutesSettings = CreateRoutesSettings
     , crResources :: [Resource]
     , crSite :: Name
     }
+
+data CreateRoutesResult = CreateRoutesResult
+    { decRoutes :: Dec
+    , decSiteType :: Dec
+    , decSite :: Dec
+    }
+
+createRoutes' :: CreateRoutesSettings -> Q [Dec]
+createRoutes' s = do
+    CreateRoutesResult x y z <- createRoutes s
+    return [x, y, z]
