@@ -22,10 +22,7 @@ data StaticRoutes = StaticRoutes { unStaticRoutes :: [String] }
 siteStatic :: Site StaticRoutes
            ( String
           -> Application
-          -> StaticArgs
-          -> (StaticRoutes -> mroutes)
-          -> (mroutes -> String)
-          -> master
+          -> (margs, margs -> StaticArgs, StaticRoutes -> mroutes, mroutes -> String)
           -> Application
            )
 siteStatic = Site

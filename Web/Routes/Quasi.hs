@@ -319,16 +319,18 @@ dispDec set = do
                     let disp = hs `AppE` VarE (mkName f)
                     o <- [|(.)|]
                     let render' = InfixE (Just $ VarE render) o $ Just $ ConE $ mkName constr
-                    let param' = VarE (mkName getArg) `AppE` VarE param
+                    let param' = TupE
+                                    [ VarE param
+                                    , VarE $ mkName getArg
+                                    , ConE $ mkName constr
+                                    , VarE render
+                                    ]
                     return $ disp
                                 `AppE` render'
                                 `AppE` VarE (last conArgs)
                                 `AppE` VarE method
                                 `AppE` VarE badMethod
                                 `AppE` param'
-                                `AppE` ConE (mkName constr)
-                                `AppE` VarE render
-                                `AppE` VarE param
         return $ Clause pat (NormalB b) []
     go' [] (SubSite _ _ _) = do
         n <- newName "arg"
