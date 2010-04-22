@@ -6,6 +6,7 @@ module Web.Routes.Quasi
     , Handler (..)
     , Piece (..)
       -- * Quasi site
+    , QuasiDispatch
     , QuasiSite (..)
     , quasiFromSite
     , quasiToSite
@@ -61,15 +62,18 @@ data Piece = StaticPiece String
            | SlurpPiece String
     deriving (Read, Show, Eq, Data, Typeable)
 
+type QuasiDispatch app surl sarg murl marg
+                   = (murl -> String)
+                  -> surl
+                  -> (surl -> murl)
+                  -> marg
+                  -> (marg -> sarg)
+                  -> app -- ^ bad method handler
+                  -> String -- ^ method
+                  -> app
+
 data QuasiSite app surl sarg murl marg = QuasiSite
-    { quasiDispatch :: (murl -> String)
-                    -> surl
-                    -> (surl -> murl)
-                    -> marg
-                    -> (marg -> sarg)
-                    -> app -- ^ bad method handler
-                    -> String -- ^ method
-                    -> app
+    { quasiDispatch :: QuasiDispatch app surl sarg murl marg
     , quasiRender :: surl -> [String]
     , quasiParse :: [String] -> Maybe surl
     }
