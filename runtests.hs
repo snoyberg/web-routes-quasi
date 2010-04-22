@@ -29,9 +29,16 @@ siteStatic :: QuasiSite Application StaticRoutes StaticArgs murl marg
 siteStatic = QuasiSite
     undefined
     unStaticRoutes
-    (Just . StaticRoutes)
+    (Right . StaticRoutes)
 
-type Explode surl murl marg = (murl -> String) -> surl -> (surl -> murl) -> marg -> (marg -> Int) -> String -> Application
+type Explode surl murl marg = (murl -> String)
+                           -> surl
+                           -> (surl -> murl)
+                           -> marg
+                           -> (marg -> Int)
+                           -> Application
+                           -> String
+                           -> Application
 explode :: Explode surl murl marg -> Explode surl murl marg
 explode = id
 
@@ -51,19 +58,19 @@ createRoutes' CreateRoutesSettings
     }
 
 handleFoo :: [String] -> Explode MyRoutes murl marg
-handleFoo a mrender _surl tomurl _marg _tosarg _method _req = return $ Response
+handleFoo a mrender _surl tomurl _marg _tosarg _badmethod _method _req = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack $ show ("in foo", mrender $ tomurl $ User 78, a)
 
 handleBar :: String -> Explode MyRoutes murl marg
-handleBar a mrender _surl tomurl marg tosarg _method _req = return $ Response
+handleBar a mrender _surl tomurl marg tosarg _badmethod _method _req = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack $ show ("in bar", mrender $ tomurl $ User 78, a)
 
 getHome :: Explode MyRoutes murl marg
-getHome mrender _surl tomurl marg tosarg _method _req = return $ Response
+getHome mrender _surl tomurl marg tosarg _badmethod _method _req = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack $ show
@@ -72,7 +79,7 @@ getHome mrender _surl tomurl marg tosarg _method _req = return $ Response
                         ]
 
 getUser :: Integer -> Explode MyRoutes murl marg
-getUser uid mrender _surl tomurl marg tosarg _method _req = return $ Response
+getUser uid mrender _surl tomurl marg tosarg _badmethod _method _req = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack $ unlines
@@ -107,7 +114,7 @@ main = do
     let parseMyRoutes = quasiParse theSite
     let renderMyRoutes = quasiRender theSite
 
-    quickCheck $ \s -> parseMyRoutes (renderMyRoutes s) == Just s
+    quickCheck $ \s -> parseMyRoutes (renderMyRoutes s) == Right s
 
     --run $ dispatchMyRoutes badMethod 20 GET (show . renderMyRoutes 20) Home
 

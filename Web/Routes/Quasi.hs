@@ -1,22 +1,26 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Web.Routes.Quasi
-    ( -- * Data types
-      Resource (..)
-    , Handler (..)
-    , Piece (..)
+    (
+      -- * Quasi quoter
+      parseRoutes
+      -- * Template haskell
+    , createParse
+    , createRender
+    , createQuasiDispatch
+    , createRoutes
+    , createRoutes'
+    , CreateRoutesSettings (..)
+    , CreateRoutesResult (..)
       -- * Quasi site
     , QuasiDispatch
     , QuasiSite (..)
     , quasiFromSite
     , quasiToSite
-      -- * Quasi quoter
-    , parseRoutes
-      -- * Template haskell
-    , createRoutes
-    , createRoutes'
-    , CreateRoutesSettings (..)
-    , CreateRoutesResult (..)
+      -- * Underlying data types
+    , Resource (..)
+    , Handler (..)
+    , Piece (..)
     ) where
 
 import Data.Char
@@ -26,7 +30,6 @@ import Data.Data
 import Data.Maybe
 import Control.Monad
 import Web.Routes.Site
-import Control.Applicative ((<$>))
 
 -- | A single resource pattern.
 --
@@ -75,7 +78,7 @@ type QuasiDispatch app surl sarg murl marg
 data QuasiSite app surl sarg murl marg = QuasiSite
     { quasiDispatch :: QuasiDispatch app surl sarg murl marg
     , quasiRender :: surl -> [String]
-    , quasiParse :: [String] -> Maybe surl
+    , quasiParse :: [String] -> Either String surl
     }
 
 quasiFromSite :: Site surl app -> QuasiSite app surl () murl marg
@@ -83,7 +86,7 @@ quasiFromSite (Site dispatch render parse) = QuasiSite
     { quasiDispatch = \mrender surl constr _ _ _ _ ->
                         dispatch (mrender . constr) surl
     , quasiRender = render
-    , quasiParse = either (const Nothing) Just . parse
+    , quasiParse = parse
     }
 
 quasiToSite :: QuasiSite app surl sarg surl sarg
@@ -100,7 +103,7 @@ quasiToSite (QuasiSite dispatch render parse) grabMethod badMethod sarg = Site
                                     id
                                     badMethod)
     , formatPathSegments = render
-    , parsePathSegments = maybe (Left "Invalid URL") Right . parse
+    , parsePathSegments = parse
     }
 
 isStatic :: Piece -> Bool
@@ -218,16 +221,23 @@ dataTypeDec set =
     go'' _ = []
     claz = [''Show, ''Read, ''Eq]
 
-parseDec :: CreateRoutesSettings -> Q Exp
-parseDec set = do
+-- FIXME put in overlap checking
+
+-- | Whether the set of resources cover all possible URLs. FIXME test this function
+areResourcesComplete :: [Resource] -> Bool
+areResourcesComplete _ = False -- FIXME
+
+-- | Generates the set of clauses necesary to parse the given 'Resource's. FIXME switch to Either
+createParse :: [Resource] -> Q [Clause]
+createParse res = do
     final' <- final
-    clauses <- mapM go $ crResources set
-    parse <- newName "parse"
-    let fun = FunD parse $ clauses ++ [final']
-    return $ LetE [fun] $ VarE parse
+    clauses <- mapM go res
+    return $ if areResourcesComplete res
+                then clauses
+                else clauses ++ [final']
   where
     final = do
-        no <- [|Nothing|]
+        no <- [|Left "Invalid URL"|]
         return $ Clause [WildP] (NormalB no) []
     go (Resource n ps h) = do
         let ps' = zip [1..] ps
@@ -241,12 +251,12 @@ parseDec set = do
                         fm <- [|fmap|]
                         return $ fm `AppE` bod `AppE` rhs
                     _ -> do
-                        ri <- [|Just|]
+                        ri <- [|Right|]
                         return $ AppE ri bod
         checkInts' <- checkInts ps'
         return $ Clause [pat]
                         (GuardedB [(NormalG checkInts', bod')]) []
-    mkPat [] (SubSite _ _ _) = VarP $ mkName "var0"
+    mkPat [] (SubSite _ _ _) = VarP $ mkName "var0" -- FIXME use newName
     mkPat [] _ = ConP (mkName "[]") []
     mkPat ((_, StaticPiece t):rest) h =
         ConP (mkName ":") [ LitP (StringL t)
@@ -279,11 +289,9 @@ isInt [] = False
 isInt ('-':rest) = all isDigit rest
 isInt x = all isDigit x
 
-renderDec :: CreateRoutesSettings -> Q Exp
-renderDec set = do
-    name <- newName "render"
-    fun <- FunD name <$> mapM go (crResources set)
-    return $ LetE [fun] $ VarE name
+-- | Generates the set of clauses necesary to render the given 'Resource's.
+createRender :: [Resource] -> Q [Clause]
+createRender res = mapM go res
   where
     go (Resource n ps h) = do
         let ps' = zip [1..] ps
@@ -314,18 +322,15 @@ renderDec set = do
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
     mkBod ((i, SlurpPiece _):_) _ = return $ VarE $ mkName $ "var" ++ show i
 
-dispDec :: CreateRoutesSettings -> Q Exp
-dispDec set = do
+createQuasiDispatch :: CreateRoutesSettings -> Q [Clause]
+createQuasiDispatch set = do
     mrender <- newName "_mrender"
     tomurl <- newName "_tomurl"
     marg <- newName "_marg"
     tosarg <- newName "_tosarg"
     method <- newName "_method"
     badMethod <- newName "_badMethod"
-    clauses <- mapM (go mrender tomurl marg tosarg method badMethod)
-             $ crResources set
-    name <- newName "dispatch"
-    return $ LetE [FunD name clauses] $ VarE name
+    mapM (go mrender tomurl marg tosarg method badMethod) $ crResources set
   where
     go mrender tomurl marg tosarg method badMethod
        (Resource constr ps handler) = do
@@ -411,14 +416,25 @@ siteDecType set = do
                 `AppT` VarT murl
                 `AppT` VarT marg
 
-siteDec :: CreateRoutesSettings -> Exp -> Exp -> Exp -> Q Dec
-siteDec set dispatch render parse = do
+siteDec :: Name -- ^ name of resulting function
+        -> [Clause] -- ^ parse
+        -> [Clause] -- ^ render
+        -> [Clause] -- ^ dispatch
+        -> Q Dec
+siteDec name parse render dispatch = do
     si <- [|QuasiSite|]
-    let body = si `AppE` dispatch
-                  `AppE` render
-                  `AppE` parse
-    return $ FunD (crSite set)
-        [ Clause [] (NormalB body) []
+    dname <- newName "dispatch"
+    rname <- newName "render"
+    pname <- newName "parse"
+    let body = si `AppE` VarE dname
+                  `AppE` VarE rname
+                  `AppE` VarE pname
+    return $ FunD name
+        [ Clause [] (NormalB body)
+            [ FunD dname dispatch
+            , FunD rname render
+            , FunD pname parse
+            ]
         ]
 
 -- | Template haskell code to convert a list of 'Resource's into appropriate
@@ -470,11 +486,11 @@ siteDec set dispatch render parse = do
 createRoutes :: CreateRoutesSettings -> Q CreateRoutesResult
 createRoutes set = do
     dt <- dataTypeDec set
-    pa <- parseDec set
-    re <- renderDec set
-    di <- dispDec set
+    parseClauses <- createParse $ crResources set
+    renderClauses <- createRender $ crResources set
+    dispatchClauses <- createQuasiDispatch set
     st <- siteDecType set
-    s <- siteDec set di re pa
+    s <- siteDec (crSite set) parseClauses renderClauses dispatchClauses
     return CreateRoutesResult
         { decRoutes = dt
         , decSiteType = st
