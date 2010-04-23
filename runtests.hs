@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 module Main
     ( main
     , waiSite
@@ -28,7 +29,9 @@ getStaticArgs _ = StaticArgs
 data StaticRoutes = StaticRoutes { unStaticRoutes :: [String] }
     deriving (Show, Read, Eq)
 
-siteStatic :: QuasiSite Application StaticRoutes StaticArgs murl marg
+type instance Routes StaticArgs = StaticRoutes
+
+siteStatic :: QuasiSite Application StaticArgs marg
 siteStatic = QuasiSite
     undefined
     unStaticRoutes
@@ -45,7 +48,8 @@ type Explode surl murl marg = (murl -> String)
 explode :: Explode surl murl marg -> Explode surl murl marg
 explode = id
 
-createRoutes' CreateRoutesSettings
+fmap (\(QuasiSiteDecs a b c d) -> [a, b, c, d])
+  $ createQuasiSite QuasiSiteSettings
     { crRoutes = mkName "MyRoutes"
     , crApplication = ConT ''Application
     , crArgument = ConT ''Int

@@ -1,24 +1,28 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE TypeFamilies #-}
 module Web.Routes.Quasi
     (
       -- * Quasi quoter
       parseRoutes
     , parseRoutesNoCheck
       -- * Template haskell
-    , createParse
-    , createRender
+      -- ** Low level
     , createQuasiDispatch
-    , createRoutes
-    , createRoutes'
-    , CreateRoutesSettings (..)
-    , CreateRoutesResult (..)
+    , createRender
+    , createParse
+      -- ** High level for 'QuasiSite's
+    , createQuasiSite
+    , QuasiSiteSettings (..)
+    , QuasiSiteDecs (..)
       -- * Quasi site
     , QuasiDispatch
     , QuasiSite (..)
     , quasiFromSite
     , quasiToSite
+    , Routes
+    , BlankArgs (..)
       -- * Underlying data types
     , Resource (..)
     , Handler (..)
@@ -60,8 +64,9 @@ data Resource = Resource String [Piece] Handler
 -- Single dispatches to a single function for all methods.
 --
 -- SubSite passes dispatch to a different site. The first argument is the name
--- of the datatype for the routes. The second is a function returning a 'Site'
--- for that type of routes.
+-- of the datatype for the routes. The second is a function returning a
+-- 'QuasiSite' for that type of routes. The third is a function converting the
+-- master argument to the subsite argument.
 data Handler = ByMethod [(String, String)] -- ^ (method, handler)
              | Single String
              | SubSite String String String
@@ -78,23 +83,37 @@ data Piece = StaticPiece String
            | SlurpPiece String
     deriving (Read, Show, Eq, Data, Typeable)
 
-type QuasiDispatch app surl sarg murl marg
-                   = (murl -> String)
-                  -> surl
-                  -> (surl -> murl)
-                  -> marg
-                  -> (marg -> sarg)
+type family Routes a
+
+-- | The type for quasiDispatch; separated out for clarity of Haddock docs.
+type QuasiDispatch app sub master
+                   = (Routes master -> String)
+                  -> Routes sub
+                  -> (Routes sub -> Routes master)
+                  -> master
+                  -> (master -> sub)
                   -> app -- ^ bad method handler
                   -> String -- ^ method
                   -> app
 
-data QuasiSite app surl sarg murl marg = QuasiSite
-    { quasiDispatch :: QuasiDispatch app surl sarg murl marg
-    , quasiRender :: surl -> [String]
-    , quasiParse :: [String] -> Either String surl
+-- | Very similar in principle to 'Site', but with special support for
+-- arguments and subsites.
+data QuasiSite app sub master = QuasiSite
+    { quasiDispatch :: QuasiDispatch app sub master
+    , quasiRender :: Routes sub -> [String]
+    , quasiParse :: [String] -> Either String (Routes sub)
     }
 
-quasiFromSite :: Site surl app -> QuasiSite app surl () murl marg
+-- | Used for applications with no arguments. In particular, this facilitates a
+-- translation from a 'Site' to a 'QuasiSite' via 'quasiFromSite'.
+data BlankArgs routes = BlankArgs
+type instance Routes (BlankArgs routes) = routes
+
+-- | Convert a 'Site' to a 'QuasiSite'. 'quasiRender' and 'quasiParse' are
+-- identical to 'formatPathSegments' and 'parsePathSegments'; for the
+-- 'quasiDispatch' function, we just ignore the extra arguments that 'Site'
+-- does not use.
+quasiFromSite :: Site surl app -> QuasiSite app (BlankArgs surl) master
 quasiFromSite (Site dispatch render parse) = QuasiSite
     { quasiDispatch = \mrender surl constr _ _ _ _ ->
                         dispatch (mrender . constr) surl
@@ -102,17 +121,22 @@ quasiFromSite (Site dispatch render parse) = QuasiSite
     , quasiParse = parse
     }
 
-quasiToSite :: QuasiSite app surl sarg surl sarg
+-- | Convert a 'QuasiSite' to a 'Site'. 'quasiRender' and 'quasiParse' are
+-- identical to 'formatPathSegments' and 'parsePathSegments'; for the
+-- 'handleSite' function, we need some extra information passed to this
+-- function. We also restrict the resulting 'QuasiSite' to cases where subsite
+-- and master site are the same.
+quasiToSite :: QuasiSite app sub sub
             -> ((String -> app) -> app) -- ^ grab method
             -> app -- ^ bad method
-            -> sarg
-            -> Site surl app
-quasiToSite (QuasiSite dispatch render parse) grabMethod badMethod sarg = Site
-    { handleSite = \rend surl -> grabMethod (dispatch
+            -> sub
+            -> Site (Routes sub) app
+quasiToSite (QuasiSite dispatch render parse) grabMethod badMethod sub = Site
+    { handleSite = \rend url -> grabMethod (dispatch
                                     rend
-                                    surl
+                                    url
                                     id
-                                    sarg
+                                    sub
                                     id
                                     badMethod)
     , formatPathSegments = render
@@ -173,7 +197,7 @@ pieceFromString x = StaticPiece x
 
 -- | A quasi-quoter to parse a string into a list of 'Resource's. Checks for
 -- overlapping routes, failing if present; use 'parseRoutesNoCheck' to skip the
--- checking.
+-- checking. See documentation site for details on syntax.
 parseRoutes :: QuasiQuoter
 parseRoutes = QuasiQuoter x y where
     x s = do
@@ -183,6 +207,7 @@ parseRoutes = QuasiQuoter x y where
             _ -> error $ "Overlapping routes: " ++ show res
     y = dataToPatQ (const Nothing) . resourcesFromString
 
+-- | Same as 'parseRoutes', but performs no overlap checking.
 parseRoutesNoCheck :: QuasiQuoter
 parseRoutesNoCheck = QuasiQuoter x y where
     x = liftResources . resourcesFromString
@@ -233,7 +258,7 @@ liftHandler (SubSite x y z) = do
     z' <- lift z
     return $ c `AppE` x' `AppE` y' `AppE` z'
 
-dataTypeDec :: CreateRoutesSettings -> Q Dec
+dataTypeDec :: QuasiSiteSettings -> Q Dec
 dataTypeDec set =
     return $ DataD [] (crRoutes set) []
              (map go $ crResources set) claz
@@ -296,7 +321,7 @@ areResourcesComplete res =
         | i + 1 == m = helper i is
         | otherwise = False
 
--- | Generates the set of clauses necesary to parse the given 'Resource's.
+-- | Generates the set of clauses necesary to parse the given 'Resource's. See 'quasiParse'.
 createParse :: [Resource] -> Q [Clause]
 createParse res = do
     final' <- final
@@ -358,7 +383,8 @@ isInt [] = False
 isInt ('-':rest) = all isDigit rest
 isInt x = all isDigit x
 
--- | Generates the set of clauses necesary to render the given 'Resource's.
+-- | Generates the set of clauses necesary to render the given 'Resource's. See
+-- 'quasiRender'.
 createRender :: [Resource] -> Q [Clause]
 createRender res = mapM go res
   where
@@ -391,7 +417,9 @@ createRender res = mapM go res
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
     mkBod ((i, SlurpPiece _):_) _ = return $ VarE $ mkName $ "var" ++ show i
 
-createQuasiDispatch :: CreateRoutesSettings -> Q [Clause]
+-- | Generate the set of clauses necesary to dispatch the given 'Resource's.
+-- See 'quasiDispatch'.
+createQuasiDispatch :: QuasiSiteSettings -> Q [Clause]
 createQuasiDispatch set = do
     mrender <- newName "_mrender"
     tomurl <- newName "_tomurl"
@@ -472,18 +500,15 @@ createQuasiDispatch set = do
         return $ n : ns
     go'' base arg = return $ base `AppE` VarE arg
 
-siteDecType :: CreateRoutesSettings -> Q Dec
+siteDecType :: QuasiSiteSettings -> Q Dec
 siteDecType set = do
-    let marg = mkName "marg"
-        murl = mkName "murl"
+    let master = mkName "master"
     return $ SigD (crSite set) $ ForallT
-        [PlainTV marg, PlainTV murl]
+        [PlainTV master]
         [] $ ConT ''QuasiSite
                 `AppT` crApplication set
-                `AppT` ConT (crRoutes set)
                 `AppT` crArgument set
-                `AppT` VarT murl
-                `AppT` VarT marg
+                `AppT` VarT master
 
 siteDec :: Name -- ^ name of resulting function
         -> [Clause] -- ^ parse
@@ -507,84 +532,76 @@ siteDec name parse render dispatch = do
         ]
 
 -- | Template haskell code to convert a list of 'Resource's into appropriate
--- declarations.
---
--- This function takes four arguments in addition to the list of resources.
---
--- * The first is the name of the data type for routes; this function will
--- declare that data type with constructors according to the resources.
---
--- * The second is the datatype of an application. This depends on your
--- underlying web server; in the case of WAI, you would use
--- Network.Wai.Application. This is the value ultimately returned by the
--- dispatch function, and must be the output type of the fourth argument.
---
--- * The third argument is the data type for arguments. This is a data type
--- which you must define, and which will be available to all handler functions.
---
--- * The fourth is the trickiest; it is an explode function, designed to make
--- writing of handler functions much simpler. It is a function with type
--- signature:
---     \"myapp -> args -> (url -> String) -> application\"
---  where args, url and application are the 3rd, 1st and 2nd arguments,
---  respectively.
---
---  This function produces 5 declarations (plus type signatures). For
---  simplicity's sake, let's assume createRoutes was called as follows:
---
---  > createRoutes \"MyRoutes\" ''Application ''MyArgs \"myExplode\" resources
---
---  With:
---
---  > myExplode :: MyApp url -> MyArgs -> (url -> String) -> Application
---
---  * Defines the routes data type.
---
---  * parseMyRoutes :: [String] -> Either String MyRoutes
---
---  * renderMyRoutes :: MyRoutes -> [String]
---
---  * dispatchMyRoutes :: (MyRoutes -> String) -> BlogRoutes -> String ->
---  Application -> MyArgs -> Application. In this signature, the first argument
---  is a handler for unsupported methods, and the third is the requested
---  method.
---
---  * siteMyRoutes :: Site MyRoutes (String -> Application -> MyArgs ->
---  Application). The first argument is the method and the second handles
---  unsupported methods.
-createRoutes :: CreateRoutesSettings -> Q CreateRoutesResult
-createRoutes set = do
+-- declarations for a 'QuasiSite'. See the 'QuasiSiteSettings' and
+-- 'QuasiSiteDecs' data types for an explanation for the input and output,
+-- respectively, of this function.
+createQuasiSite :: QuasiSiteSettings -> Q QuasiSiteDecs
+createQuasiSite set = do
     dt <- dataTypeDec set
+    let tySyn = TySynInstD ''Routes [crArgument set] $ ConT $ crRoutes set
     parseClauses <- createParse $ crResources set
     renderClauses <- createRender $ crResources set
     dispatchClauses <- createQuasiDispatch set
     st <- siteDecType set
     s <- siteDec (crSite set) parseClauses renderClauses dispatchClauses
-    return CreateRoutesResult
+    return QuasiSiteDecs
         { decRoutes = dt
+        , decRoutesSyn = tySyn
         , decSiteType = st
         , decSite = s
         }
 
-data CreateRoutesSettings = CreateRoutesSettings
-    { crRoutes :: Name
+-- | The arguments passed to 'createQuasiSite' for generating applications
+-- based on the 'QuasiSite' datatype.
+data QuasiSiteSettings = QuasiSiteSettings
+    { -- | The name for the URL data type to be created.
+      crRoutes :: Name
+      -- | The type for underlying applications.
     , crApplication :: Type
+      -- | The type for the argument value to be passed to dispatch functions.
     , crArgument :: Type
+      -- | Underlying applications will often want to program against some
+      -- datatype. The explode function converts that datatype into a function
+      -- that will generate an application ('crApplication'). In particular,
+      -- the value of crExplode should have a type signature of:
+      --
+      -- > explode :: handler
+      -- >         -> ('Routes' master -> String)
+      -- >         -> 'Routes' sub
+      -- >         -> ('Routes' sub -> 'Routes' master)
+      -- >         -> master
+      -- >         -> (master -> sub)
+      -- >         -> app
+      -- >         -> String
+      -- >         -> app
+      --
+      -- handler is some datatype handled by the calling application;
+      -- web-routes-quasi needn't know about it. sub and master are the
+      -- arguments for the subsite and master site, respectively. app is the
+      -- datatype for the underlying application; the app argument above is the
+      -- handler for unsupported method. The 'String' argument is the request
+      -- method.
     , crExplode :: Exp
+      -- | The 'Resource's upon which we are building the set of URLs and
+      -- dispatches. Usually generated by 'parseRoutes'.
     , crResources :: [Resource]
+      -- | The name for the resulting function which will return the 'QuasiSite'.
     , crSite :: Name
     }
 
-data CreateRoutesResult = CreateRoutesResult
-    { decRoutes :: Dec
+-- | The template Haskell declarations returned from 'createQuasiSite'.
+data QuasiSiteDecs = QuasiSiteDecs
+    { -- | Defines the actual URL datatype, which all its constructors.
+      decRoutes :: Dec
+      -- | Defines the 'Routes' type synonym instance between the argument
+      -- ('crArgument') and URL datatype.
+    , decRoutesSyn :: Dec
+      -- | The type signature for the site function ('decSite').
     , decSiteType :: Dec
+      -- | Function which returns a 'QuasiSite'. The type parameters for the
+      -- 'QuasiSite' will be 'crApplication', 'crArgument' and a forall master.
     , decSite :: Dec
     }
-
-createRoutes' :: CreateRoutesSettings -> Q [Dec]
-createRoutes' s = do
-    CreateRoutesResult x y z <- createRoutes s
-    return [x, y, z]
 
 #if TEST
 testSuite :: Test
