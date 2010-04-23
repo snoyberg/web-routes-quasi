@@ -502,13 +502,15 @@ createQuasiDispatch set = do
 
 siteDecType :: QuasiSiteSettings -> Q Dec
 siteDecType set = do
-    let master = mkName "master"
-    return $ SigD (crSite set) $ ForallT
-        [PlainTV master]
-        [] $ ConT ''QuasiSite
-                `AppT` crApplication set
-                `AppT` crArgument set
-                `AppT` VarT master
+    let core = ConT ''QuasiSite `AppT` crApplication set `AppT` crArgument set
+    let ty = case crMaster set of
+                Left master -> core `AppT` master
+                Right classes ->
+                    let master = mkName "master"
+                        master' = VarT master
+                        cxt = map (flip ClassP [master']) classes
+                     in ForallT [PlainTV master] cxt $ core `AppT` master'
+    return $ SigD (crSite set) ty
 
 siteDec :: Name -- ^ name of resulting function
         -> [Clause] -- ^ parse
@@ -587,6 +589,10 @@ data QuasiSiteSettings = QuasiSiteSettings
     , crResources :: [Resource]
       -- | The name for the resulting function which will return the 'QuasiSite'.
     , crSite :: Name
+      -- | Describes the type of the master argument. This can either be a
+      -- 'Left' concrete datatype, or 'Right' a list of 'Pred's describing the
+      -- context for master.
+    , crMaster :: Either Type [Name]
     }
 
 -- | The template Haskell declarations returned from 'createQuasiSite'.
