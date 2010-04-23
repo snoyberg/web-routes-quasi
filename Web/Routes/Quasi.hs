@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE CPP #-}
 module Web.Routes.Quasi
     (
       -- * Quasi quoter
@@ -21,6 +22,9 @@ module Web.Routes.Quasi
     , Resource (..)
     , Handler (..)
     , Piece (..)
+#if TEST
+    , testSuite
+#endif
     ) where
 
 import Data.Char
@@ -30,6 +34,14 @@ import Data.Data
 import Data.Maybe
 import Control.Monad
 import Web.Routes.Site
+import Data.Either
+import Data.List
+
+#if TEST
+import Test.Framework (testGroup, Test)
+import Test.Framework.Providers.HUnit
+import Test.HUnit hiding (Test)
+#endif
 
 -- | A single resource pattern.
 --
@@ -114,6 +126,10 @@ isSubSite :: Handler -> Bool
 isSubSite (SubSite _ _ _) = True
 isSubSite _ = False
 
+isString :: Piece -> Bool
+isString (StringPiece _) = True
+isString _ = False
+
 -- | Drop leading whitespace.
 trim :: String -> String
 trim = dropWhile isSpace
@@ -157,7 +173,11 @@ pieceFromString x = StaticPiece x
 -- | A quasi-quoter to parse a string into a list of 'Resource's.
 parseRoutes :: QuasiQuoter
 parseRoutes = QuasiQuoter x y where
-    x = liftResources . resourcesFromString
+    x s = do
+        let res = resourcesFromString s
+        case findOverlaps res of
+            [] -> liftResources res
+            _ -> error $ "Overlapping routes: " ++ show res
     y = dataToPatQ (const Nothing) . resourcesFromString
 
 liftResources :: [Resource] -> Q Exp
@@ -221,13 +241,35 @@ dataTypeDec set =
     go'' _ = []
     claz = [''Show, ''Read, ''Eq]
 
--- FIXME put in overlap checking
+-- FIXME add unit test
+findOverlaps :: [Resource] -> [(Resource, Resource)]
+findOverlaps _ = [] -- FIXME
 
--- | Whether the set of resources cover all possible URLs. FIXME test this function
+-- | Whether the set of resources cover all possible URLs.
 areResourcesComplete :: [Resource] -> Bool
-areResourcesComplete _ = False -- FIXME
+areResourcesComplete res =
+    let (slurps, noSlurps) = partitionEithers $ mapMaybe go res
+     in case slurps of
+            [] -> False
+            _ -> let minSlurp = minimum slurps
+                  in helper minSlurp $ reverse $ sort noSlurps
+  where
+    go :: Resource -> Maybe (Either Int Int)
+    go (Resource _ ps (SubSite _ _ _)) = go' Left ps
+    go (Resource _ ps _) =
+        case reverse ps of
+            [] -> Just $ Right 0
+            (SlurpPiece _:rest) -> go' Left rest
+            x -> go' Right x
+    go' b x = if all isString x then Just (b $ length x) else Nothing
+    helper 0 _ = True
+    helper _ [] = False
+    helper m (i:is)
+        | i >= m = helper m is
+        | i + 1 == m = helper i is
+        | otherwise = False
 
--- | Generates the set of clauses necesary to parse the given 'Resource's. FIXME switch to Either
+-- | Generates the set of clauses necesary to parse the given 'Resource's.
 createParse :: [Resource] -> Q [Clause]
 createParse res = do
     final' <- final
@@ -516,3 +558,35 @@ createRoutes' :: CreateRoutesSettings -> Q [Dec]
 createRoutes' s = do
     CreateRoutesResult x y z <- createRoutes s
     return [x, y, z]
+
+#if TEST
+testSuite :: Test
+testSuite = testGroup "Web.Routes.Quasi"
+    [ testCase "overlaps" caseOverlaps
+    , testCase "complete" caseComplete
+    ]
+
+caseOverlaps :: Assertion
+caseOverlaps = return () -- FIXME
+
+caseComplete :: Assertion
+caseComplete = do
+    assertBool "empty" $ not $ areResourcesComplete []
+    assertBool "slurp" $ areResourcesComplete
+                [ Resource "Foo" [SlurpPiece "foo"] $ Single "foo"
+                ]
+    assertBool "subsite" $ areResourcesComplete
+                [ Resource "Foo" [] $ SubSite "a" "b" "c"
+                ]
+    assertBool "string + subsite" $ areResourcesComplete
+                [ Resource "Foo" [StringPiece "x"] $ SubSite "a" "b" "c"
+                , Resource "Bar" [] $ Single "bar"
+                ]
+    assertBool "int + subsite" $ not $ areResourcesComplete
+                [ Resource "Foo" [IntPiece "x"] $ SubSite "a" "b" "c"
+                ]
+    assertBool "two pieces" $ not $ areResourcesComplete
+                [ Resource "Foo" [StringPiece "x"] $ Single "foo"
+                , Resource "Bar" [IntPiece "x"] $ SubSite "a" "b" "c"
+                ]
+#endif
