@@ -241,9 +241,28 @@ dataTypeDec set =
     go'' _ = []
     claz = [''Show, ''Read, ''Eq]
 
--- FIXME add unit test
 findOverlaps :: [Resource] -> [(Resource, Resource)]
-findOverlaps _ = [] -- FIXME
+findOverlaps = gos . map justPieces
+  where
+    justPieces r@(Resource _ ps (SubSite{})) = (ps ++ [SlurpPiece ""], r)
+    justPieces r@(Resource _ ps _) = (ps, r)
+    gos [] = []
+    gos (x:xs) = mapMaybe (go x) xs ++ gos xs
+    go (StaticPiece x:xs, xr) (StaticPiece y:ys, yr)
+        | x == y = go (xs, xr) (ys, yr)
+        | otherwise = Nothing
+    go (SlurpPiece _:_, xr) (_, yr) = Just (xr, yr)
+    go (_, xr) (SlurpPiece _:_, yr) = Just (xr, yr)
+    go (StaticPiece x:xs, xr) (IntPiece _:ys, yr)
+        | isInt x = go (xs, xr) (ys, yr)
+        | otherwise = Nothing
+    go (IntPiece _:xs, xr) (StaticPiece y:ys, yr)
+        | isInt y = go (xs, xr) (ys, yr)
+        | otherwise = Nothing
+    go ([], xr) ([], yr) = Just (xr, yr)
+    go ([], _) (_, _) = Nothing
+    go (_, _) ([], _) = Nothing
+    go (_:xs, xr) (_:ys, yr) = go (xs, xr) (ys, yr)
 
 -- | Whether the set of resources cover all possible URLs.
 areResourcesComplete :: [Resource] -> Bool
@@ -567,7 +586,23 @@ testSuite = testGroup "Web.Routes.Quasi"
     ]
 
 caseOverlaps :: Assertion
-caseOverlaps = return () -- FIXME
+caseOverlaps = do
+    assertBool "empty" $ null $ findOverlaps []
+    assertBool "single" $ null $ findOverlaps
+                [ Resource "Foo" [] $ Single "foo"
+                ]
+    assertBool "two empties" $ not $ null $ findOverlaps
+                [ Resource "Foo" [] $ Single "foo"
+                , Resource "Bar" [] $ Single "bar"
+                ]
+    assertBool "slurp versus empty" $ not $ null $ findOverlaps
+                [ Resource "Foo" [] $ Single "foo"
+                , Resource "Bar" [] $ SubSite "a" "b" "c"
+                ]
+    assertBool "int + slurp versus empty" $ null $ findOverlaps
+                [ Resource "Foo" [] $ Single "foo"
+                , Resource "Bar" [IntPiece ""] $ SubSite "a" "b" "c"
+                ]
 
 caseComplete :: Assertion
 caseComplete = do

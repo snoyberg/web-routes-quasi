@@ -5,7 +5,7 @@ module Main
     , waiSite
     ) where
 
-import Test.Framework (defaultMain, testGroup, Test)
+import Test.Framework (defaultMain)
 import Test.Framework.Providers.QuickCheck2
 
 import Web.Routes.Quasi
@@ -67,7 +67,7 @@ handleFoo a mrender _surl tomurl _marg _tosarg _badmethod _method _req = return 
                     $ Right $ fromLBS $ pack $ show ("in foo", mrender $ tomurl $ User 78, a)
 
 handleBar :: String -> Explode MyRoutes murl marg
-handleBar a mrender _surl tomurl marg tosarg _badmethod _method _req = return $ Response
+handleBar a mrender _surl tomurl _marg _tosarg _badmethod _method _req = return $ Response
                     Status200
                     []
                     $ Right $ fromLBS $ pack $ show ("in bar", mrender $ tomurl $ User 78, a)
