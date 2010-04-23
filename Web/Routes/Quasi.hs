@@ -5,6 +5,7 @@ module Web.Routes.Quasi
     (
       -- * Quasi quoter
       parseRoutes
+    , parseRoutesNoCheck
       -- * Template haskell
     , createParse
     , createRender
@@ -170,7 +171,9 @@ pieceFromString ('#':x) = IntPiece x
 pieceFromString ('*':x) = SlurpPiece x
 pieceFromString x = StaticPiece x
 
--- | A quasi-quoter to parse a string into a list of 'Resource's.
+-- | A quasi-quoter to parse a string into a list of 'Resource's. Checks for
+-- overlapping routes, failing if present; use 'parseRoutesNoCheck' to skip the
+-- checking.
 parseRoutes :: QuasiQuoter
 parseRoutes = QuasiQuoter x y where
     x s = do
@@ -178,6 +181,11 @@ parseRoutes = QuasiQuoter x y where
         case findOverlaps res of
             [] -> liftResources res
             _ -> error $ "Overlapping routes: " ++ show res
+    y = dataToPatQ (const Nothing) . resourcesFromString
+
+parseRoutesNoCheck :: QuasiQuoter
+parseRoutesNoCheck = QuasiQuoter x y where
+    x = liftResources . resourcesFromString
     y = dataToPatQ (const Nothing) . resourcesFromString
 
 liftResources :: [Resource] -> Q Exp
