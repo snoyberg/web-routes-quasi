@@ -270,7 +270,7 @@ dataTypeDec set =
     go' (IntPiece _) = Just (NotStrict, ConT ''Integer)
     go' (SlurpPiece _) = Just (NotStrict, AppT ListT $ ConT ''String)
     go' _ = Nothing
-    go'' (SubSite t _ _) = [(NotStrict, ConT $ mkName t)]
+    go'' (SubSite t _ _) = [(NotStrict, ConT ''Routes `AppT` ConT (mkName t))]
     go'' _ = []
     claz = [''Show, ''Read, ''Eq]
 
@@ -322,8 +322,8 @@ areResourcesComplete res =
         | otherwise = False
 
 -- | Generates the set of clauses necesary to parse the given 'Resource's. See 'quasiParse'.
-createParse :: [Resource] -> Q [Clause]
-createParse res = do
+createParse :: QuasiSiteSettings -> [Resource] -> Q [Clause]
+createParse set res = do
     final' <- final
     clauses <- mapM go res
     return $ if areResourcesComplete res
@@ -338,9 +338,14 @@ createParse res = do
         let pat = mkPat ps' h
         bod <- foldM go' (ConE $ mkName n) ps'
         bod' <- case h of
-                    SubSite _ f _ -> do
+                    SubSite argType f _ -> do
                         parse <- [|quasiParse|]
-                        let parse' = parse `AppE` VarE (mkName f)
+                        let siteType = ConT ''QuasiSite
+                                        `AppT` crApplication set
+                                        `AppT` ConT (mkName argType)
+                                        `AppT` crArgument set
+                            siteVar = VarE (mkName f) `SigE` siteType
+                        let parse' = parse `AppE` siteVar
                         let rhs = parse' `AppE` VarE (mkName "var0")
                         fm <- [|fmap|]
                         return $ fm `AppE` bod `AppE` rhs
@@ -385,8 +390,8 @@ isInt x = all isDigit x
 
 -- | Generates the set of clauses necesary to render the given 'Resource's. See
 -- 'quasiRender'.
-createRender :: [Resource] -> Q [Clause]
-createRender res = mapM go res
+createRender :: QuasiSiteSettings -> [Resource] -> Q [Clause]
+createRender set res = mapM go res
   where
     go (Resource n ps h) = do
         let ps' = zip [1..] ps
@@ -397,9 +402,14 @@ createRender res = mapM go res
     lastPat _ = []
     go' (_, StaticPiece _) = Nothing
     go' (i, _) = Just $ VarP $ mkName $ "var" ++ show (i :: Int)
-    mkBod [] (SubSite _ f _) = do
+    mkBod [] (SubSite argType f _) = do
         format <- [|quasiRender|]
-        let format' = format `AppE` VarE (mkName f)
+        let siteType = ConT ''QuasiSite
+                        `AppT` crApplication set
+                        `AppT` ConT (mkName argType)
+                        `AppT` crArgument set
+            siteVar = VarE (mkName f) `SigE` siteType
+        let format' = format `AppE` siteVar
         return $ format' `AppE` VarE (mkName "var0")
     mkBod [] _ = lift ([] :: [String])
     mkBod ((_, StaticPiece x):xs) h = do
@@ -472,9 +482,14 @@ createQuasiDispatch set = do
                                 then []
                                 else [Match WildP (NormalB $ VarE badMethod) []]
                     return $ CaseE (VarE method) $ matches ++ final
-                SubSite _ f getArg -> do
+                SubSite argType f getArg -> do
                     qd <- [|quasiDispatch|]
-                    let disp = qd `AppE` VarE (mkName f)
+                    let siteType = ConT ''QuasiSite
+                                    `AppT` crApplication set
+                                    `AppT` ConT (mkName argType)
+                                    `AppT` crArgument set
+                        siteVar = VarE (mkName f) `SigE` siteType
+                    let disp = qd `AppE` siteVar
                     o <- [|(.)|]
                     let tomurl' = InfixE (Just $ VarE tomurl) o
                                 $ Just $ ConE $ mkName constr
@@ -541,8 +556,8 @@ createQuasiSite :: QuasiSiteSettings -> Q QuasiSiteDecs
 createQuasiSite set = do
     dt <- dataTypeDec set
     let tySyn = TySynInstD ''Routes [crArgument set] $ ConT $ crRoutes set
-    parseClauses <- createParse $ crResources set
-    renderClauses <- createRender $ crResources set
+    parseClauses <- createParse set $ crResources set
+    renderClauses <- createRender set $ crResources set
     dispatchClauses <- createQuasiDispatch set
     st <- siteDecType set
     s <- siteDec (crSite set) parseClauses renderClauses dispatchClauses
