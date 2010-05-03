@@ -57,11 +57,12 @@ fmap (\(QuasiSiteDecs a b c d) -> [a, b, c, d])
     , crResources = [$parseRoutes|
 /                    Home       GET
 /user/#userid        User       GET PUT DELETE
-/static              Static     StaticRoutes siteStatic getStaticArgs
+/static              Static     StaticArgs siteStatic getStaticArgs
 /foo/*slurp          Foo
 /bar/$barparam       Bar
 |]
     , crSite = mkName "theSite"
+    , crMaster = Left $ ConT ''Int
     }
 
 handleFoo :: [String] -> Explode MyRoutes murl marg
