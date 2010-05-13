@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 import Blog
 import Static
 import Network.Wai.Handler.SimpleServer

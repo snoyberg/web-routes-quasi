@@ -28,6 +28,10 @@ module Web.Routes.Quasi
     , Resource (..)
     , Handler (..)
     , Piece (..)
+      -- * FIXME
+    , ToString (..)
+    , IsString
+    , IsSlurp (..)
 #if TEST
     , testSuite
 #endif
@@ -42,6 +46,7 @@ import Control.Monad
 import Web.Routes.Site
 import Data.Either
 import Data.List
+import Data.String
 
 #if TEST
 import Test.Framework (testGroup, Test)
@@ -377,12 +382,24 @@ createParse set res = do
         , mkPat rest h
         ]
     go' x (_, StaticPiece _) = return x
-    go' x (i, SlurpPiece _) =
-        return $ x `AppE` VarE (mkName $ "var" ++ show i)
-    go' x (i, StringPiece _) =
-        return $ x `AppE` VarE (mkName $ "var" ++ show i)
+    go' x (i, SlurpPiece y) = do
+        let e = VarE (mkName $ "var" ++ show i)
+        e' <- case y of
+                Nothing -> return e
+                Just _ -> do
+                    fs <- [|fromSlurp|]
+                    return $ fs `AppE` e
+        return $ x `AppE` e'
+    go' x (i, StringPiece y) = do
+        let e = VarE $ mkName $ "var" ++ show i
+        e' <- case y of
+                Nothing -> return e
+                Just _ -> do
+                    fs <- [|fromString|]
+                    return $ fs `AppE` e
+        return $ x `AppE` e'
     go' x (i, IntPiece _) = do
-        re <- [|read|]
+        re <- [|fromInteger . read|]
         return $ x `AppE` (re `AppE` VarE (mkName $ "var" ++ show i))
     checkInts [] = [|True|]
     checkInts ((i, IntPiece _):rest) = do
@@ -426,16 +443,28 @@ createRender set res = mapM go res
         x' <- lift x
         xs' <- mkBod xs h
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
-    mkBod ((i, StringPiece _):xs) h = do
+    mkBod ((i, StringPiece y):xs) h = do
         let x' = VarE $ mkName $ "var" ++ show i
+        x'' <- case y of
+                Nothing -> return x'
+                Just _ -> do
+                    ts <- [|toString|]
+                    return $ ts `AppE` x'
         xs' <- mkBod xs h
-        return $ ConE (mkName ":") `AppE` x' `AppE` xs'
+        return $ ConE (mkName ":") `AppE` x'' `AppE` xs'
     mkBod ((i, IntPiece _):xs) h= do
-        sh <- [|show|]
+        sh <- [|show . fromIntegral|]
         let x' = AppE sh $ VarE $ mkName $ "var" ++ show i
         xs' <- mkBod xs h
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
-    mkBod ((i, SlurpPiece _):_) _ = return $ VarE $ mkName $ "var" ++ show i
+    mkBod ((i, SlurpPiece y):_) _ = do
+        let x' = VarE $ mkName $ "var" ++ show i
+        x'' <- case y of
+                Nothing -> return x'
+                Just _ -> do
+                    ts <- [|toSlurp|]
+                    return $ ts `AppE` x'
+        return x''
 
 -- | Generate the set of clauses necesary to dispatch the given 'Resource's.
 -- See 'quasiDispatch'.
@@ -686,3 +715,10 @@ caseComplete = do
                 , Resource "Bar" [IntPiece "x"] $ SubSite "a" "b" "c"
                 ]
 #endif
+
+class IsString s => ToString s where
+    toString :: s -> String
+
+class IsSlurp s where
+    fromSlurp :: [String] -> s
+    toSlurp :: s -> [String]

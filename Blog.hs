@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Blog where
 
 import Web.Routes.Quasi
@@ -9,12 +10,20 @@ import Network.Wai
 import Network.Wai.Enumerator
 import Static
 import Language.Haskell.TH.Syntax
+import Data.String
 
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy.Char8 as L
 
+newtype Slug = Slug { unSlug :: String }
+    deriving (Eq, Read, Show)
+instance IsString Slug where
+    fromString = Slug
+instance ToString Slug where
+    toString = unSlug
+
 data Entry = Entry
-    { entrySlug :: String
+    { entrySlug :: Slug
     , entryTitle :: String
     , entryContent :: String
     }
@@ -36,6 +45,15 @@ newtype MyApp arg url = MyApp
                -> Application
     }
 
+newtype MyInt = MyInt Int
+    deriving (Num, Integral, Eq, Show, Real, Enum, Ord, Read)
+
+newtype MySlurp = MySlurp { unMySlurp :: [String] }
+    deriving (Eq, Show, Read)
+instance IsSlurp MySlurp where
+    toSlurp = unMySlurp
+    fromSlurp = MySlurp
+
 createQuasiSite' QuasiSiteSettings
     { crRoutes = mkName "BlogRoutes"
     , crApplication = ConT ''Application
@@ -43,16 +61,20 @@ createQuasiSite' QuasiSiteSettings
     , crExplode = VarE $ mkName "runMyApp"
     , crResources = [$parseRoutes|
 /                Home       GET
-/entry/$         EntryRoute GET
-/fake/#          Fake
+/entry/$Slug     EntryRoute GET
+/fake/#MyInt     Fake
+/slurp/*MySlurp  Slurp      GET
 /static          StaticR    Static siteStatic staticPath
 |]
     , crSite = mkName "siteBlog"
     , crMaster = Left $ ConT ''BlogArgs
     }
 
-handleFake :: Integer -> MyApp BlogArgs BlogRoutes
+handleFake :: MyInt -> MyApp BlogArgs BlogRoutes
 handleFake = undefined
+
+getSlurp :: MySlurp -> MyApp BlogArgs BlogRoutes
+getSlurp = undefined
 
 getHome :: MyApp BlogArgs BlogRoutes
 getHome = MyApp $ \f _ _ ba _ _ _ _-> return Response
@@ -62,7 +84,7 @@ getHome = MyApp $ \f _ _ ba _ _ _ _-> return Response
     , responseBody = Right $ fromLBS $ L.pack ""
     }
 
-getEntryRoute :: String -> MyApp BlogArgs BlogRoutes
+getEntryRoute :: Slug -> MyApp BlogArgs BlogRoutes
 getEntryRoute slug = MyApp $ \f _ _ ba _ _ _ _ ->
     case filter (\x -> entrySlug x == slug) $ blogEntries ba of
         [] -> return Response
