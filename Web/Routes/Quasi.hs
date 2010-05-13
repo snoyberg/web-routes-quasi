@@ -14,6 +14,7 @@ module Web.Routes.Quasi
     , createParse
       -- ** High level for 'QuasiSite's
     , createQuasiSite
+    , createQuasiSite'
     , QuasiSiteSettings (..)
     , QuasiSiteDecs (..)
       -- * Quasi site
@@ -78,9 +79,9 @@ data Handler = ByMethod [(String, String)] -- ^ (method, handler)
 -- other constructors, it is the name of the parameter represented by this
 -- piece. That value is not used here, but may be useful elsewhere.
 data Piece = StaticPiece String
-           | StringPiece String
-           | IntPiece String
-           | SlurpPiece String
+           | StringPiece (Maybe String)
+           | IntPiece (Maybe String)
+           | SlurpPiece (Maybe String)
     deriving (Read, Show, Eq, Data, Typeable)
 
 type family Routes a
@@ -190,10 +191,14 @@ piecesFromString x =
      in pieceFromString y : piecesFromString (drop1Slash z)
 
 pieceFromString :: String -> Piece
-pieceFromString ('$':x) = StringPiece x
-pieceFromString ('#':x) = IntPiece x
-pieceFromString ('*':x) = SlurpPiece x
+pieceFromString ('$':x) = StringPiece $ getConstr x
+pieceFromString ('#':x) = IntPiece $ getConstr x
+pieceFromString ('*':x) = SlurpPiece $ getConstr x
 pieceFromString x = StaticPiece x
+
+getConstr :: String -> Maybe String
+getConstr a@(x:_) | isUpper x = Just a
+getConstr _ = Nothing
 
 -- | A quasi-quoter to parse a string into a list of 'Resource's. Checks for
 -- overlapping routes, failing if present; use 'parseRoutesNoCheck' to skip the
@@ -266,18 +271,23 @@ dataTypeDec set =
     go (Resource n pieces h) = NormalC (mkName n)
                              $ mapMaybe go' pieces
                             ++ go'' h
-    go' (StringPiece _) = Just (NotStrict, ConT ''String)
-    go' (IntPiece _) = Just (NotStrict, ConT ''Integer)
-    go' (SlurpPiece _) = Just (NotStrict, AppT ListT $ ConT ''String)
+    go' (StringPiece x) = Just (NotStrict, getConstr' (ConT ''String) x)
+    go' (IntPiece x) = Just (NotStrict, getConstr' (ConT ''Integer) x)
+    go' (SlurpPiece x) =
+        Just (NotStrict, getConstr' (AppT ListT $ ConT ''String) x)
     go' _ = Nothing
     go'' (SubSite t _ _) = [(NotStrict, ConT ''Routes `AppT` ConT (mkName t))]
     go'' _ = []
     claz = [''Show, ''Read, ''Eq]
 
+getConstr' :: Type -> Maybe String -> Type
+getConstr' t Nothing = t
+getConstr' _ (Just s) = ConT $ mkName s
+
 findOverlaps :: [Resource] -> [(Resource, Resource)]
 findOverlaps = gos . map justPieces
   where
-    justPieces r@(Resource _ ps (SubSite{})) = (ps ++ [SlurpPiece ""], r)
+    justPieces r@(Resource _ ps (SubSite{})) = (ps ++ [SlurpPiece Nothing], r)
     justPieces r@(Resource _ ps _) = (ps, r)
     gos [] = []
     gos (x:xs) = mapMaybe (go x) xs ++ gos xs
@@ -623,6 +633,11 @@ data QuasiSiteDecs = QuasiSiteDecs
       -- 'QuasiSite' will be 'crApplication', 'crArgument' and a forall master.
     , decSite :: Dec
     }
+
+createQuasiSite' :: QuasiSiteSettings -> Q [Dec]
+createQuasiSite' s = do
+    QuasiSiteDecs a b c d <- createQuasiSite s
+    return [a, b, c, d]
 
 #if TEST
 testSuite :: Test

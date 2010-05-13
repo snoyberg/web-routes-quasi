@@ -4,7 +4,7 @@ module Web.Routes.Quasi.Wai where
 import Network.Wai
 import Network.Wai.Enumerator
 import Web.Routes
-import qualified Web.Routes.Quasi as Q
+import Web.Routes.Quasi
 
 import Data.ByteString.Char8 (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as L
@@ -20,7 +20,7 @@ data WaiArgs = WaiArgs
     , wai404 :: Application
     }
 
-waiSite :: (Site url (String -> Application -> args -> Application))
+waiSite :: QuasiSite Application args args
         -> WaiArgs
         -> args
         -> Application
@@ -29,12 +29,12 @@ waiSite site wa args req = do
     let pieces = filter (not . null)
                $ decodePathInfo $ drop1Slash $ unpack $ pathInfo req
     print ("pieces", pieces)
-    case parsePathSegments site pieces of
+    case quasiParse site pieces of
         Left _ -> wai404 wa req
         Right url ->
             let format u = waiApproot wa ++ encodePathInfo
-                            (formatPathSegments site u)
-             in handleSite site format url method (waiBadMethod wa) args req
+                            (quasiRender site u)
+             in quasiDispatch site format url id args id (waiBadMethod wa) method req
 
 readMethod :: Method -> String
 readMethod = unpack . methodToBS
@@ -52,6 +52,3 @@ def404 _ = return $ Response
     , responseHeaders = []
     , responseBody = Right $ fromLBS $ L.pack "Not found"
     }
-
-createWaiRoutes s =
-    Q.createRoutes (s ++ "Routes") ''Application $ mkName $ s ++ "Args"

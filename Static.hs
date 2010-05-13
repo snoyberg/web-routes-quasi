@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 module Static where
 
 import Network.Wai
@@ -6,15 +7,19 @@ import Data.ByteString.Lazy.Char8 (pack)
 import Web.Routes
 import Web.Encodings
 import System.Directory
+import Web.Routes.Quasi
+
+data Static = Static FilePath
+type instance Routes Static = StaticRoutes
 
 data StaticRoutes = StaticRoutes { unStaticRoutes :: [String] }
     deriving (Show, Read, Eq)
 
-siteStatic :: Site StaticRoutes (String -> Application -> FilePath -> Application)
-siteStatic = Site
-    { handleSite = \_ (StaticRoutes r) method badMethod fp -> serveFile method badMethod r fp
-    , formatPathSegments = unStaticRoutes
-    , parsePathSegments = Right . StaticRoutes
+siteStatic :: QuasiSite Application Static master
+siteStatic = QuasiSite
+    { quasiDispatch = \_ (StaticRoutes r) _ _ _ badMethod method -> serveFile method badMethod r "static" -- FIXME
+    , quasiRender = unStaticRoutes
+    , quasiParse = Right . StaticRoutes
     }
 
 serveFile :: String -> Application -> [String] -> FilePath -> Application
