@@ -362,7 +362,7 @@ createParse set res = do
                             siteVar = VarE (mkName f) `SigE` siteType
                         let parse' = parse `AppE` siteVar
                         let rhs = parse' `AppE` VarE (mkName "var0")
-                        fm <- [|fmap|]
+                        fm <- [|fmape|]
                         return $ fm `AppE` bod `AppE` rhs
                     _ -> do
                         ri <- [|Right|]
@@ -410,6 +410,11 @@ createParse set res = do
                    `AppE` rest'
     checkInts (_:rest) = checkInts rest
 
+-- | 'fmap' for 'Either'
+fmape :: (a -> b) -> Either l a -> Either l b
+fmape _ (Left l) = Left l
+fmape f (Right a) = Right $ f a
+
 isInt :: String -> Bool
 isInt [] = False
 isInt ('-':rest) = all isDigit rest
@@ -453,7 +458,7 @@ createRender set res = mapM go res
         xs' <- mkBod xs h
         return $ ConE (mkName ":") `AppE` x'' `AppE` xs'
     mkBod ((i, IntPiece _):xs) h= do
-        sh <- [|show . fromIntegral|]
+        sh <- [|show . (fromIntegral :: Integral i => i -> Integer)|]
         let x' = AppE sh $ VarE $ mkName $ "var" ++ show i
         xs' <- mkBod xs h
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'

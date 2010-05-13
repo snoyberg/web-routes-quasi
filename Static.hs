@@ -4,8 +4,6 @@ module Static where
 import Network.Wai
 import Network.Wai.Enumerator
 import Data.ByteString.Lazy.Char8 (pack)
-import Web.Routes
-import Web.Encodings
 import System.Directory
 import Web.Routes.Quasi
 

@@ -8,7 +8,6 @@ import Web.Routes.Quasi
 
 import Data.ByteString.Char8 (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as L
-import Language.Haskell.TH.Syntax
 
 drop1Slash :: String -> String
 drop1Slash ('/':x) = x

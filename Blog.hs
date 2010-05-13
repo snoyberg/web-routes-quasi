@@ -5,7 +5,6 @@
 module Blog where
 
 import Web.Routes.Quasi
-import Web.Routes.Site
 import Network.Wai
 import Network.Wai.Enumerator
 import Static
