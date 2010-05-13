@@ -28,6 +28,7 @@ module Web.Routes.Quasi
     , Resource (..)
     , Handler (..)
     , Piece (..)
+    , liftResources
       -- * FIXME
     , ToString (..)
     , IsString
@@ -656,7 +657,7 @@ data QuasiSiteSettings = QuasiSiteSettings
 
 -- | The template Haskell declarations returned from 'createQuasiSite'.
 data QuasiSiteDecs = QuasiSiteDecs
-    { -- | Defines the actual URL datatype, which all its constructors.
+    { -- | Defines the actual URL datatype, with all its constructors.
       decRoutes :: Dec
       -- | Defines the 'Routes' type synonym instance between the argument
       -- ('crArgument') and URL datatype.
