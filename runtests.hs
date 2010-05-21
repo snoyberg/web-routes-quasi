@@ -18,8 +18,8 @@ import Network.Wai.Enumerator
 import Data.ByteString.Lazy.Char8 (pack)
 import Data.ByteString.Char8 (unpack)
 import Web.Routes.Site
-import Web.Encodings
 import Language.Haskell.TH.Syntax
+import Web.Encodings
 
 data StaticArgs = StaticArgs
 
@@ -56,10 +56,10 @@ fmap (\(QuasiSiteDecs a b c d) -> [a, b, c, d])
     , crExplode = VarE $ mkName "explode"
     , crResources = [$parseRoutes|
 /                    Home       GET
-/user/#userid        User       GET PUT DELETE
+/user/#Integer       User       GET PUT DELETE
 /static              Static     StaticArgs siteStatic getStaticArgs
-/foo/*slurp          Foo
-/bar/$barparam       Bar
+/foo/*Strings        Foo
+/bar/#String         Bar
 |]
     , crSite = mkName "theSite"
     , crMaster = Left $ ConT ''Int

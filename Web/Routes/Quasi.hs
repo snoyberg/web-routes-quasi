@@ -2,6 +2,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 module Web.Routes.Quasi
     (
       -- * Quasi quoter
@@ -30,9 +32,9 @@ module Web.Routes.Quasi
     , Piece (..)
     , liftResources
       -- * FIXME
-    , ToString (..)
-    , IsString
-    , IsSlurp (..)
+    , SinglePiece (..)
+    , MultiPiece (..)
+    , Strings
 #if TEST
     , testSuite
 #endif
@@ -47,7 +49,6 @@ import Control.Monad
 import Web.Routes.Site
 import Data.Either
 import Data.List
-import Data.String
 
 #if TEST
 import Test.Framework (testGroup, Test)
@@ -57,7 +58,7 @@ import Test.HUnit hiding (Test)
 
 -- | A single resource pattern.
 --
--- First argument is the name of the constructor, second is that URL pattern to
+-- First argument is the name of the constructor, second is the URL pattern to
 -- match, third is how to dispatch.
 data Resource = Resource String [Piece] Handler
     deriving (Read, Show, Eq, Data, Typeable)
@@ -85,9 +86,8 @@ data Handler = ByMethod [(String, String)] -- ^ (method, handler)
 -- other constructors, it is the name of the parameter represented by this
 -- piece. That value is not used here, but may be useful elsewhere.
 data Piece = StaticPiece String
-           | StringPiece (Maybe String)
-           | IntPiece (Maybe String)
-           | SlurpPiece (Maybe String)
+           | SinglePiece String
+           | MultiPiece String
     deriving (Read, Show, Eq, Data, Typeable)
 
 type family Routes a
@@ -158,9 +158,11 @@ isSubSite :: Handler -> Bool
 isSubSite (SubSite _ _ _) = True
 isSubSite _ = False
 
+{- FIXME
 isString :: Piece -> Bool
 isString (StringPiece _) = True
 isString _ = False
+-}
 
 -- | Drop leading whitespace.
 trim :: String -> String
@@ -197,14 +199,9 @@ piecesFromString x =
      in pieceFromString y : piecesFromString (drop1Slash z)
 
 pieceFromString :: String -> Piece
-pieceFromString ('$':x) = StringPiece $ getConstr x
-pieceFromString ('#':x) = IntPiece $ getConstr x
-pieceFromString ('*':x) = SlurpPiece $ getConstr x
+pieceFromString ('#':x) = SinglePiece x
+pieceFromString ('*':x) = MultiPiece x
 pieceFromString x = StaticPiece x
-
-getConstr :: String -> Maybe String
-getConstr a@(x:_) | isUpper x = Just a
-getConstr _ = Nothing
 
 -- | A quasi-quoter to parse a string into a list of 'Resource's. Checks for
 -- overlapping routes, failing if present; use 'parseRoutesNoCheck' to skip the
@@ -240,16 +237,12 @@ liftPieces = fmap ListE . mapM go where
         c <- [|StaticPiece|]
         s' <- lift s
         return $ c `AppE` s'
-    go (StringPiece s) = do
-        c <- [|StringPiece|]
+    go (SinglePiece s) = do
+        c <- [|SinglePiece|]
         s' <- lift s
         return $ c `AppE` s'
-    go (IntPiece s) = do
-        c <- [|IntPiece|]
-        s' <- lift s
-        return $ c `AppE` s'
-    go (SlurpPiece s) = do
-        c <- [|SlurpPiece|]
+    go (MultiPiece s) = do
+        c <- [|MultiPiece|]
         s' <- lift s
         return $ c `AppE` s'
 
@@ -277,37 +270,25 @@ dataTypeDec set =
     go (Resource n pieces h) = NormalC (mkName n)
                              $ mapMaybe go' pieces
                             ++ go'' h
-    go' (StringPiece x) = Just (NotStrict, getConstr' (ConT ''String) x)
-    go' (IntPiece x) = Just (NotStrict, getConstr' (ConT ''Integer) x)
-    go' (SlurpPiece x) =
-        Just (NotStrict, getConstr' (AppT ListT $ ConT ''String) x)
-    go' _ = Nothing
+    go' (SinglePiece x) = Just (NotStrict, ConT $ mkName x)
+    go' (MultiPiece x) = Just (NotStrict, ConT $ mkName x)
+    go' (StaticPiece _) = Nothing
     go'' (SubSite t _ _) = [(NotStrict, ConT ''Routes `AppT` ConT (mkName t))]
     go'' _ = []
     claz = [''Show, ''Read, ''Eq]
 
-getConstr' :: Type -> Maybe String -> Type
-getConstr' t Nothing = t
-getConstr' _ (Just s) = ConT $ mkName s
-
 findOverlaps :: [Resource] -> [(Resource, Resource)]
 findOverlaps = gos . map justPieces
   where
-    justPieces r@(Resource _ ps (SubSite{})) = (ps ++ [SlurpPiece Nothing], r)
+    justPieces r@(Resource _ ps (SubSite{})) = (ps ++ [MultiPiece ""], r)
     justPieces r@(Resource _ ps _) = (ps, r)
     gos [] = []
     gos (x:xs) = mapMaybe (go x) xs ++ gos xs
     go (StaticPiece x:xs, xr) (StaticPiece y:ys, yr)
         | x == y = go (xs, xr) (ys, yr)
         | otherwise = Nothing
-    go (SlurpPiece _:_, xr) (_, yr) = Just (xr, yr)
-    go (_, xr) (SlurpPiece _:_, yr) = Just (xr, yr)
-    go (StaticPiece x:xs, xr) (IntPiece _:ys, yr)
-        | isInt x = go (xs, xr) (ys, yr)
-        | otherwise = Nothing
-    go (IntPiece _:xs, xr) (StaticPiece y:ys, yr)
-        | isInt y = go (xs, xr) (ys, yr)
-        | otherwise = Nothing
+    go (MultiPiece _:_, xr) (_, yr) = Just (xr, yr)
+    go (_, xr) (MultiPiece _:_, yr) = Just (xr, yr)
     go ([], xr) ([], yr) = Just (xr, yr)
     go ([], _) (_, _) = Nothing
     go (_, _) ([], _) = Nothing
@@ -327,15 +308,17 @@ areResourcesComplete res =
     go (Resource _ ps _) =
         case reverse ps of
             [] -> Just $ Right 0
-            (SlurpPiece _:rest) -> go' Left rest
+            (MultiPiece _:rest) -> go' Left rest
             x -> go' Right x
-    go' b x = if all isString x then Just (b $ length x) else Nothing
+    go' b x = if all isSingle x then Just (b $ length x) else Nothing
     helper 0 _ = True
     helper _ [] = False
     helper m (i:is)
         | i >= m = helper m is
         | i + 1 == m = helper i is
         | otherwise = False
+    isSingle (SinglePiece _) = True
+    isSingle _ = False
 
 -- | Generates the set of clauses necesary to parse the given 'Resource's. See 'quasiParse'.
 createParse :: QuasiSiteSettings -> [Resource] -> Q [Clause]
@@ -349,77 +332,57 @@ createParse set res = do
     final = do
         no <- [|Left "Invalid URL"|]
         return $ Clause [WildP] (NormalB no) []
-    go (Resource n ps h) = do
-        let ps' = zip [1..] ps
-        let pat = mkPat ps' h
-        bod <- foldM go' (ConE $ mkName n) ps'
-        bod' <- case h of
-                    SubSite argType f _ -> do
-                        parse <- [|quasiParse|]
-                        let siteType = ConT ''QuasiSite
-                                        `AppT` crApplication set
-                                        `AppT` ConT (mkName argType)
-                                        `AppT` crArgument set
-                            siteVar = VarE (mkName f) `SigE` siteType
-                        let parse' = parse `AppE` siteVar
-                        let rhs = parse' `AppE` VarE (mkName "var0")
-                        fm <- [|fmape|]
-                        return $ fm `AppE` bod `AppE` rhs
-                    _ -> do
-                        ri <- [|Right|]
-                        return $ AppE ri bod
-        checkInts' <- checkInts ps'
-        return $ Clause [pat]
-                        (GuardedB [(NormalG checkInts', bod')]) []
-    mkPat [] (SubSite _ _ _) = VarP $ mkName "var0" -- FIXME use newName
-    mkPat [] _ = ConP (mkName "[]") []
-    mkPat ((_, StaticPiece t):rest) h =
-        ConP (mkName ":") [ LitP (StringL t)
-                          , mkPat rest h
-                          ]
-    mkPat ((i, SlurpPiece _):_) _ = VarP $ mkName $ "var" ++ show i
-    mkPat ((i, _):rest) h = ConP (mkName ":")
-        [ VarP $ mkName $ "var" ++ show (i :: Int)
-        , mkPat rest h
-        ]
-    go' x (_, StaticPiece _) = return x
-    go' x (i, SlurpPiece y) = do
-        let e = VarE (mkName $ "var" ++ show i)
-        e' <- case y of
-                Nothing -> return e
-                Just _ -> do
-                    fs <- [|fromSlurp|]
-                    return $ fs `AppE` e
-        return $ x `AppE` e'
-    go' x (i, StringPiece y) = do
-        let e = VarE $ mkName $ "var" ++ show i
-        e' <- case y of
-                Nothing -> return e
-                Just _ -> do
-                    fs <- [|fromString|]
-                    return $ fs `AppE` e
-        return $ x `AppE` e'
-    go' x (i, IntPiece _) = do
-        re <- [|fromInteger . read|]
-        return $ x `AppE` (re `AppE` VarE (mkName $ "var" ++ show i))
-    checkInts [] = [|True|]
-    checkInts ((i, IntPiece _):rest) = do
-        ii <- [|isInt|]
-        a <- [|(&&)|]
-        rest' <- checkInts rest
-        return $ a `AppE` (ii `AppE` VarE (mkName $ "var" ++ show i))
-                   `AppE` rest'
-    checkInts (_:rest) = checkInts rest
+    mkPat' :: Exp -> [Piece] -> Exp -> Q (Pat, Exp)
+    mkPat' be [MultiPiece s] parse = do
+        v <- newName $ "var" ++ s
+        fmp <- [|fromMultiPiece|]
+        let parse' = InfixE (Just parse) be $ Just $ fmp `AppE` VarE v
+        return (VarP v, parse')
+    mkPat' _ (MultiPiece _:_) _parse = error "MultiPiece must be last"
+    mkPat' be (StaticPiece s:rest) parse = do
+        (x, parse') <- mkPat' be rest parse
+        let cons = ConP $ mkName ":"
+        return $ (cons [LitP $ StringL s, x], parse')
+    mkPat' be (SinglePiece s:rest) parse = do
+        fsp <- [|fromSinglePiece|]
+        v <- newName $ "var" ++ s
+        let parse' = InfixE (Just parse) be $ Just $ fsp `AppE` VarE v
+        (x, parse'') <- mkPat' be rest parse'
+        let cons = ConP $ mkName ":"
+        return (cons [VarP v, x], parse'')
+    mkPat' _ [] parse = return (ListP [], parse)
+    go (Resource n ps (SubSite argType f _)) = do
+        unless (all isStatic ps) $ error "SubSite cannot have parameters"
+        let strs = map (\(StaticPiece s) -> s) ps
+        parse <- [|quasiParse|]
+        let siteType = ConT ''QuasiSite
+                        `AppT` crApplication set
+                        `AppT` ConT (mkName argType)
+                        `AppT` crArgument set
+            siteVar = VarE (mkName f) `SigE` siteType -- FIXME siteType necessary?
+        let parse' = parse `AppE` siteVar
+        var <- newName "var"
+        let rhs = parse' `AppE` VarE var
+        fm <- [|fmape|]
+        let body = NormalB $ fm `AppE` ConE (mkName n) `AppE` rhs
+        let cons s p = ConP (mkName ":") [LitP $ StringL s, p]
+        let pat = foldr cons (VarP var) strs
+        return $ Clause [pat] body []
+    go (Resource n ps _) = do
+        ri <- [|Right|]
+        be <- [|ape|]
+        (pat, parse) <- mkPat' be ps $ ri `AppE` ConE (mkName n)
+        return $ Clause [pat] (NormalB parse) []
 
--- | 'fmap' for 'Either'
-fmape :: (a -> b) -> Either l a -> Either l b
-fmape _ (Left l) = Left l
+-- | 'ap' for 'Either'
+ape :: Either String (a -> b) -> Either String a -> Either String b
+ape (Left e) _ = Left e
+ape (Right _) (Left e) = Left e
+ape (Right f) (Right a) = Right $ f a
+
+fmape :: (a -> b) -> Either String a -> Either String b
+fmape _ (Left e) = Left e
 fmape f (Right a) = Right $ f a
-
-isInt :: String -> Bool
-isInt [] = False
-isInt ('-':rest) = all isDigit rest
-isInt x = all isDigit x
 
 -- | Generates the set of clauses necesary to render the given 'Resource's. See
 -- 'quasiRender'.
@@ -449,28 +412,16 @@ createRender set res = mapM go res
         x' <- lift x
         xs' <- mkBod xs h
         return $ ConE (mkName ":") `AppE` x' `AppE` xs'
-    mkBod ((i, StringPiece y):xs) h = do
+    mkBod ((i, SinglePiece _):xs) h = do
         let x' = VarE $ mkName $ "var" ++ show i
-        x'' <- case y of
-                Nothing -> return x'
-                Just _ -> do
-                    ts <- [|toString|]
-                    return $ ts `AppE` x'
+        tsp <- [|toSinglePiece|]
+        let x'' = tsp `AppE` x'
         xs' <- mkBod xs h
         return $ ConE (mkName ":") `AppE` x'' `AppE` xs'
-    mkBod ((i, IntPiece _):xs) h= do
-        sh <- [|show . (fromIntegral :: Integral i => i -> Integer)|]
-        let x' = AppE sh $ VarE $ mkName $ "var" ++ show i
-        xs' <- mkBod xs h
-        return $ ConE (mkName ":") `AppE` x' `AppE` xs'
-    mkBod ((i, SlurpPiece y):_) _ = do
+    mkBod ((i, MultiPiece _):_) _ = do
         let x' = VarE $ mkName $ "var" ++ show i
-        x'' <- case y of
-                Nothing -> return x'
-                Just _ -> do
-                    ts <- [|toSlurp|]
-                    return $ ts `AppE` x'
-        return x''
+        tmp <- [|toMultiPiece|]
+        return $ tmp `AppE` x'
 
 -- | Generate the set of clauses necesary to dispatch the given 'Resource's.
 -- See 'quasiDispatch'.
@@ -695,36 +646,49 @@ caseOverlaps = do
                 [ Resource "Foo" [] $ Single "foo"
                 , Resource "Bar" [] $ SubSite "a" "b" "c"
                 ]
-    assertBool "int + slurp versus empty" $ null $ findOverlaps
+    assertBool "static + slurp versus empty" $ null $ findOverlaps
                 [ Resource "Foo" [] $ Single "foo"
-                , Resource "Bar" [IntPiece ""] $ SubSite "a" "b" "c"
+                , Resource "Bar" [StaticPiece "5"] $ SubSite "a" "b" "c"
                 ]
 
 caseComplete :: Assertion
 caseComplete = do
     assertBool "empty" $ not $ areResourcesComplete []
     assertBool "slurp" $ areResourcesComplete
-                [ Resource "Foo" [SlurpPiece "foo"] $ Single "foo"
+                [ Resource "Foo" [MultiPiece "Foos"] $ Single "foo"
                 ]
     assertBool "subsite" $ areResourcesComplete
                 [ Resource "Foo" [] $ SubSite "a" "b" "c"
                 ]
     assertBool "string + subsite" $ areResourcesComplete
-                [ Resource "Foo" [StringPiece "x"] $ SubSite "a" "b" "c"
+                [ Resource "Foo" [SinglePiece "Foo"] $ SubSite "a" "b" "c"
                 , Resource "Bar" [] $ Single "bar"
                 ]
-    assertBool "int + subsite" $ not $ areResourcesComplete
-                [ Resource "Foo" [IntPiece "x"] $ SubSite "a" "b" "c"
+    assertBool "static + subsite" $ not $ areResourcesComplete
+                [ Resource "Foo" [StaticPiece "foo"] $ SubSite "a" "b" "c"
                 ]
     assertBool "two pieces" $ not $ areResourcesComplete
-                [ Resource "Foo" [StringPiece "x"] $ Single "foo"
-                , Resource "Bar" [IntPiece "x"] $ SubSite "a" "b" "c"
+                [ Resource "Foo" [SinglePiece "Foo"] $ Single "foo"
+                , Resource "Bar" [StaticPiece "foo"] $ SubSite "a" "b" "c"
                 ]
 #endif
 
-class IsString s => ToString s where
-    toString :: s -> String
+class SinglePiece s where
+    fromSinglePiece :: String -> Either String s
+    toSinglePiece :: s -> String
+instance SinglePiece String where
+    fromSinglePiece = Right
+    toSinglePiece = id
+instance SinglePiece Integer where
+    fromSinglePiece s = case reads s of
+                            (i, _):_ -> Right i
+                            _ -> Left $ "Invalid integer: " ++ s
+    toSinglePiece = show
 
-class IsSlurp s where
-    fromSlurp :: [String] -> s
-    toSlurp :: s -> [String]
+class MultiPiece s where
+    fromMultiPiece :: [String] -> Either String s
+    toMultiPiece :: s -> [String]
+instance MultiPiece [String] where
+    fromMultiPiece = Right
+    toMultiPiece = id
+type Strings = [String]

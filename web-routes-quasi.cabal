@@ -1,5 +1,5 @@
 name:            web-routes-quasi
-version:         0.2.0
+version:         0.3.0
 license:         BSD3
 license-file:    LICENSE
 author:          Michael Snoyman <michael@snoyman.com>
@@ -27,9 +27,13 @@ executable             runtests
         Buildable: True
         cpp-options:   -DTEST
         build-depends: QuickCheck >= 2 && < 3,
-                       web-encodings,
+                       HUnit,
+                       test-framework,
+                       test-framework-hunit,
+                       test-framework-quickcheck2,
                        bytestring,
                        wai,
+                       web-encodings >= 0.2.6.1 && < 0.3,
                        wai-extra
     else
         Buildable: False

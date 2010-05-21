@@ -60,7 +60,7 @@ createQuasiSite' QuasiSiteSettings
     , crExplode = VarE $ mkName "runMyApp"
     , crResources = [$parseRoutes|
 /                Home       GET
-/entry/$Slug     EntryRoute GET
+/entry/#Slug     EntryRoute GET
 /fake/#MyInt     Fake
 /slurp/*MySlurp  Slurp      GET
 /static          StaticR    Static siteStatic staticPath
