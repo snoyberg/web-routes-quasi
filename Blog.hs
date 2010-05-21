@@ -57,7 +57,7 @@ createQuasiSite' QuasiSiteSettings
 /                Home       GET
 /entry/#Slug     EntryRoute GET
 /fake/#MyInt     Fake
-/slurp/*MySlurp  Slurp      GET
+/slurp/*MySlurp  Slurp      GET:getMySlurp
 /static          StaticR    Static siteStatic staticPath
 |]
     , crSite = mkName "siteBlog"
@@ -67,8 +67,8 @@ createQuasiSite' QuasiSiteSettings
 handleFake :: MyInt -> MyApp BlogArgs BlogRoutes
 handleFake = undefined
 
-getSlurp :: MySlurp -> MyApp BlogArgs BlogRoutes
-getSlurp = undefined
+getMySlurp :: MySlurp -> MyApp BlogArgs BlogRoutes
+getMySlurp = undefined
 
 getHome :: MyApp BlogArgs BlogRoutes
 getHome = MyApp $ \f _ _ ba _ _ _ _-> return Response

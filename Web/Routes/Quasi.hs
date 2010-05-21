@@ -185,8 +185,12 @@ resourcesFromString = map go . filter (not . null) . map trim . lines where
     go' constr [] = Single $ "handle" ++ constr
     go' _ [routes, getSite@(x:_), grabArgs@(y:_)]
         | isLower x && isLower y = SubSite routes getSite grabArgs
-    go' constr rest = ByMethod
-                      $ map (\x -> (x, map toLower x ++ constr)) rest
+    go' constr rest = ByMethod $ map helper rest
+      where
+        helper x =
+            case break (== ':') x of
+                (method, ':' : func) -> (method, func)
+                _ -> (x, map toLower x ++ constr)
 
 drop1Slash :: String -> String
 drop1Slash ('/':x) = x
