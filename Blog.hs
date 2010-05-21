@@ -15,11 +15,9 @@ import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy.Char8 as L
 
 newtype Slug = Slug { unSlug :: String }
-    deriving (Eq, Read, Show)
+    deriving (Eq, Read, Show, SinglePiece)
 instance IsString Slug where
     fromString = Slug
-instance ToString Slug where
-    toString = unSlug
 
 data Entry = Entry
     { entrySlug :: Slug
@@ -45,13 +43,10 @@ newtype MyApp arg url = MyApp
     }
 
 newtype MyInt = MyInt Int
-    deriving (Num, Integral, Eq, Show, Real, Enum, Ord, Read)
+    deriving (Num, Integral, Eq, Show, Real, Enum, Ord, Read, SinglePiece)
 
 newtype MySlurp = MySlurp { unMySlurp :: [String] }
-    deriving (Eq, Show, Read)
-instance IsSlurp MySlurp where
-    toSlurp = unMySlurp
-    fromSlurp = MySlurp
+    deriving (Eq, Show, Read, MultiPiece)
 
 createQuasiSite' QuasiSiteSettings
     { crRoutes = mkName "BlogRoutes"

@@ -684,6 +684,11 @@ instance SinglePiece Integer where
                             (i, _):_ -> Right i
                             _ -> Left $ "Invalid integer: " ++ s
     toSinglePiece = show
+instance SinglePiece Int where
+    fromSinglePiece s = case reads s of
+                            (i, _):_ -> Right i
+                            _ -> Left $ "Invalid integer: " ++ s
+    toSinglePiece = show
 
 class MultiPiece s where
     fromMultiPiece :: [String] -> Either String s
