@@ -212,7 +212,7 @@ parseRoutes = QuasiQuoter x y where
         let res = resourcesFromString s
         case findOverlaps res of
             [] -> liftResources res
-            _ -> error $ "Overlapping routes: " ++ show res
+            _ -> error $ "Overlapping routes: " ++ unlines (map show res)
     y = dataToPatQ (const Nothing) . resourcesFromString
 
 -- | Same as 'parseRoutes', but performs no overlap checking.
