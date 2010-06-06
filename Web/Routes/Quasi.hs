@@ -49,6 +49,7 @@ import Control.Monad
 import Web.Routes.Site
 import Data.Either
 import Data.List
+import Data.Int (Int64)
 
 #if TEST
 import Test.Framework (testGroup, Test)
@@ -521,11 +522,27 @@ siteDecType set = do
     let ty = case crMaster set of
                 Left master -> core `AppT` master
                 Right classes ->
-                    let master = mkName "master"
-                        master' = VarT master
-                        cxt = map (flip ClassP [master']) classes
-                     in ForallT [PlainTV master] cxt $ core `AppT` master'
+                    let foralls = map (PlainTV . mkName)
+                                $ nub
+                                $ filter firstLower
+                                $ concatMap (words . fst) classes
+                        cxt = concatMap mkContext classes
+                     in ForallT foralls cxt
+                        $ core `AppT` (VarT $ mkName "master")
     return $ SigD (crSite set) ty
+  where
+    mkContext (dt, typs) = do
+        let dt' = mkDataType' $ words dt
+        typ <- typs
+        return $ ClassP typ [dt']
+    mkDataType' [] = error "mkDataType with null"
+    mkDataType' x = foldl1 AppT $ map go x
+    go "" = error "go with null"
+    go x@(y:_)
+        | isUpper y = ConT $ mkName x
+        | otherwise = VarT $ mkName x
+    firstLower (x:_) | isLower x = True
+    firstLower _ = False
 
 siteDec :: Name -- ^ name of resulting function
         -> [Clause] -- ^ parse
@@ -607,7 +624,7 @@ data QuasiSiteSettings = QuasiSiteSettings
       -- | Describes the type of the master argument. This can either be a
       -- 'Left' concrete datatype, or 'Right' a list of 'Pred's describing the
       -- context for master.
-    , crMaster :: Either Type [Name]
+    , crMaster :: Either Type [(String, [Name])]
     }
 
 -- | The template Haskell declarations returned from 'createQuasiSite'.
@@ -689,6 +706,11 @@ instance SinglePiece Integer where
                             _ -> Left $ "Invalid integer: " ++ s
     toSinglePiece = show
 instance SinglePiece Int where
+    fromSinglePiece s = case reads s of
+                            (i, _):_ -> Right i
+                            _ -> Left $ "Invalid integer: " ++ s
+    toSinglePiece = show
+instance SinglePiece Int64 where
     fromSinglePiece s = case reads s of
                             (i, _):_ -> Right i
                             _ -> Left $ "Invalid integer: " ++ s
