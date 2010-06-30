@@ -155,3 +155,51 @@ splitPath x =
 drop1Slash :: String -> String
 drop1Slash ('/':x) = x
 drop1Slash x = x
+
+#if TEST
+testSuite :: Test
+testSuite = testGroup "Web.Routes.Quasi"
+    [ testCase "overlaps" caseOverlaps
+    , testCase "complete" caseComplete
+    ]
+
+caseOverlaps :: Assertion
+caseOverlaps = do
+    assertBool "empty" $ null $ findOverlaps []
+    assertBool "single" $ null $ findOverlaps
+                [ Resource "Foo" [] $ Single "foo"
+                ]
+    assertBool "two empties" $ not $ null $ findOverlaps
+                [ Resource "Foo" [] $ Single "foo"
+                , Resource "Bar" [] $ Single "bar"
+                ]
+    assertBool "slurp versus empty" $ not $ null $ findOverlaps
+                [ Resource "Foo" [] $ Single "foo"
+                , Resource "Bar" [] $ SubSite "a" "b" "c"
+                ]
+    assertBool "static + slurp versus empty" $ null $ findOverlaps
+                [ Resource "Foo" [] $ Single "foo"
+                , Resource "Bar" [StaticPiece "5"] $ SubSite "a" "b" "c"
+                ]
+
+caseComplete :: Assertion
+caseComplete = do
+    assertBool "empty" $ not $ areResourcesComplete []
+    assertBool "slurp" $ areResourcesComplete
+                [ Resource "Foo" [MultiPiece "Foos"] $ Single "foo"
+                ]
+    assertBool "subsite" $ areResourcesComplete
+                [ Resource "Foo" [] $ SubSite "a" "b" "c"
+                ]
+    assertBool "string + subsite" $ areResourcesComplete
+                [ Resource "Foo" [SinglePiece "Foo"] $ SubSite "a" "b" "c"
+                , Resource "Bar" [] $ Single "bar"
+                ]
+    assertBool "static + subsite" $ not $ areResourcesComplete
+                [ Resource "Foo" [StaticPiece "foo"] $ SubSite "a" "b" "c"
+                ]
+    assertBool "two pieces" $ not $ areResourcesComplete
+                [ Resource "Foo" [SinglePiece "Foo"] $ Single "foo"
+                , Resource "Bar" [StaticPiece "foo"] $ SubSite "a" "b" "c"
+                ]
+#endif
