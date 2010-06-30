@@ -5,7 +5,6 @@ module Web.Routes.Quasi.Parse
       parseRoutes
     , parseRoutesNoCheck
     , Resource (..)
-    , Handler (..)
     , Piece (..)
     ) where
 
@@ -45,23 +44,7 @@ instance Lift Resource where
 --
 -- First argument is the name of the constructor, second is the URL pattern to
 -- match, third is how to dispatch.
-data Resource = Resource String [Piece] Handler
-    deriving (Read, Show, Eq, Data, Typeable)
-
--- | Defines how to dispatch a request for a specific resource.
---
--- ByMethod allows a different function to be called for each request method.
--- The first value in each pair is the method, the second is the name of the
--- handler.
---
--- Single dispatches to a single function for all methods.
---
--- SubSite passes dispatch to a different site. The first argument is the name
--- of the datatype for the routes. The second is a function returning a
--- 'QuasiSite' for that type of routes. The third is a function converting the
--- master argument to the subsite argument.
-data Handler = ByMethod [(String, String)] -- ^ (method, handler)
-             | Single String
+data Resource = Resource String [Piece] [String]
     deriving (Read, Show, Eq, Data, Typeable)
 
 -- | A single piece of a URL, delimited by slashes.
@@ -73,16 +56,6 @@ data Piece = StaticPiece String
            | SinglePiece String
            | MultiPiece String
     deriving (Read, Show, Eq, Data, Typeable)
-
-instance Lift Handler where
-    lift (ByMethod s) = do
-        c <- [|ByMethod|]
-        s' <- lift s
-        return $ c `AppE` s'
-    lift (Single s) = do
-        c <- [|Single|]
-        s' <- lift s
-        return $ c `AppE` s'
 
 instance Lift Piece where
     lift (StaticPiece s) = do
@@ -107,22 +80,8 @@ resourcesFromString = map go . filter (not . null) . map trim . lines where
         case words s of
             (pattern:constr:rest) ->
                 let pieces = piecesFromString $ drop1Slash pattern
-                    handler = go' constr rest
-                 in if all isStatic pieces || True -- not (isSubSite handler)
-                        then Resource constr pieces handler
-                        else error "Subsites must have static pieces"
+                 in Resource constr pieces rest
             _ -> error $ "Invalid resource line: " ++ s
-    go' constr [] = Single $ "handle" ++ constr
-    go' constr rest = ByMethod $ map helper rest
-      where
-        helper x =
-            case break (== ':') x of
-                (method, ':' : func) -> (method, func)
-                _ -> (x, map toLower x ++ constr)
-
-isStatic :: Piece -> Bool
-isStatic (StaticPiece _) = True
-isStatic _ = False
 
 -- | Drop leading whitespace.
 trim :: String -> String

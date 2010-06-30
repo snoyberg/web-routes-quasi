@@ -20,6 +20,9 @@ library
                      web-routes >= 0.22 && < 0.23,
                      template-haskell >= 2.4 && < 2.5
     exposed-modules: Web.Routes.Quasi
+                     Web.Routes.Quasi.Classes
+                     Web.Routes.Quasi.Parse
+                     Web.Routes.Quasi.TH
     ghc-options:     -Wall
 
 executable             runtests

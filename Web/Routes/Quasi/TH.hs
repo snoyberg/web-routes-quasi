@@ -180,7 +180,7 @@ createDispatch modMaster toMaster = mapM go
         let pat = [ConP (mkName n) [VarP x], VarP meth]
         let bod = d `AppE` VarE x `AppE` VarE meth
         fmap' <- [|fmap|]
-        let toMaster' = toMaster `AppE` ConE (mkName n) `AppE` tma
+        let toMaster' = toMaster `AppE` ConE (mkName n) `AppE` tma `AppE` VarE x
         let bod' = InfixE (Just toMaster') fmap' (Just bod)
         let bod'' = InfixE (Just modMaster) fmap' (Just bod')
         return $ Clause pat (NormalB bod'') []
