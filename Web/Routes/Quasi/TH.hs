@@ -103,9 +103,10 @@ createRender = mapM go
         let ps' = zip [1..] ps
         let pat = ConP (mkName n) $ mapMaybe go' ps'
         bod <- mkBod ps'
-        return $ Clause [pat] (NormalB bod) []
+        return $ Clause [pat] (NormalB $ TupE [bod, ListE []]) []
     go (n, SubSite{ssRender = r, ssPieces = pieces}) = do
-        let cons a b = InfixE (Just a) (ConE $ mkName ":") (Just b)
+        cons' <- [|\a (b, c) -> (a : b, c)|]
+        let cons a b = cons' `AppE` a `AppE` b
         x <- newName "x"
         let r' = r `AppE` VarE x
         let pat = ConP (mkName n) [VarP x]
