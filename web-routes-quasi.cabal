@@ -1,5 +1,5 @@
 name:            web-routes-quasi
-version:         0.6.0
+version:         0.6.0.1
 license:         BSD3
 license-file:    LICENSE
 author:          Michael Snoyman <michael@snoyman.com>
@@ -16,7 +16,7 @@ flag buildtests
   default: False
 
 library
-    build-depends:   base >= 4 && < 5, template-haskell >= 2.4 && < 2.5
+    build-depends:   base >= 4 && < 5, template-haskell >= 2.4 && < 2.6
     exposed-modules: Web.Routes.Quasi
                      Web.Routes.Quasi.Classes
                      Web.Routes.Quasi.Parse

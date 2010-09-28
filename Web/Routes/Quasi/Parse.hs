@@ -18,7 +18,11 @@ import Data.Maybe
 -- overlapping routes, failing if present; use 'parseRoutesNoCheck' to skip the
 -- checking. See documentation site for details on syntax.
 parseRoutes :: QuasiQuoter
-parseRoutes = QuasiQuoter x y where
+parseRoutes = QuasiQuoter
+    { quoteExp = x
+    , quotePat = y
+    }
+  where
     x s = do
         let res = resourcesFromString s
         case findOverlaps res of
@@ -28,7 +32,11 @@ parseRoutes = QuasiQuoter x y where
 
 -- | Same as 'parseRoutes', but performs no overlap checking.
 parseRoutesNoCheck :: QuasiQuoter
-parseRoutesNoCheck = QuasiQuoter x y where
+parseRoutesNoCheck = QuasiQuoter
+    { quoteExp = x
+    , quotePat = y
+    }
+  where
     x = lift . resourcesFromString
     y = dataToPatQ (const Nothing) . resourcesFromString
 
