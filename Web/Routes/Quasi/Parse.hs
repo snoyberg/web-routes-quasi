@@ -72,15 +72,18 @@ instance Lift Piece where
         return $ c `AppE` s'
 
 -- | Convert a multi-line string to a set of resources. See documentation for
--- the format of this string. This is a partial function which calls error on
+-- the format of this string. This is a partial function which calls 'error' on
 -- invalid input.
 resourcesFromString :: String -> [Resource]
-resourcesFromString = map go . filter (not . null) . map trim . lines where
+resourcesFromString =
+    mapMaybe go . lines
+  where
     go s =
-        case words s of
+        case takeWhile (/= "--") $ words s of
             (pattern:constr:rest) ->
                 let pieces = piecesFromString $ drop1Slash pattern
-                 in Resource constr pieces rest
+                 in Just $ Resource constr pieces rest
+            [] -> Nothing
             _ -> error $ "Invalid resource line: " ++ s
 
 -- | Drop leading whitespace.
