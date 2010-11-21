@@ -7,6 +7,8 @@ module Web.Routes.Quasi.Classes
     ) where
 
 import Data.Int (Int64)
+import qualified Data.Text as S
+import qualified Data.Text.Lazy as L
 
 class SinglePiece s where
     fromSinglePiece :: String -> Either String s
@@ -14,6 +16,12 @@ class SinglePiece s where
 instance SinglePiece String where
     fromSinglePiece = Right
     toSinglePiece = id
+instance SinglePiece S.Text where
+    fromSinglePiece = Right . S.pack
+    toSinglePiece = S.unpack
+instance SinglePiece L.Text where
+    fromSinglePiece = Right . L.pack
+    toSinglePiece = L.unpack
 instance SinglePiece Integer where
     fromSinglePiece s = case reads s of
                             (i, _):_ -> Right i
@@ -37,3 +45,9 @@ instance MultiPiece [String] where
     fromMultiPiece = Right
     toMultiPiece = id
 type Strings = [String]
+instance MultiPiece [S.Text] where
+    fromMultiPiece = Right . map S.pack
+    toMultiPiece = map S.unpack
+instance MultiPiece [L.Text] where
+    fromMultiPiece = Right . map L.pack
+    toMultiPiece = map L.unpack
