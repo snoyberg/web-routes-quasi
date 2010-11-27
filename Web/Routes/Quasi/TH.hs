@@ -23,7 +23,7 @@ data Pieces =
         , ssRender :: Exp
         , ssDispatch :: Exp
         , ssToMasterArg :: Exp
-        , ssPieces :: [String]
+        , ssPieces :: [Piece]
         }
   | Simple [Piece] [String] -- ^ methods
 type THResource = (String, Pieces)
@@ -32,8 +32,8 @@ createRoutes :: [THResource] -> Q [Con]
 createRoutes res =
     return $ map go res
   where
-    go (n, SubSite{ssType = s}) =
-        NormalC (mkName n) [(NotStrict, s)]
+    go (n, SubSite{ssType = s, ssPieces = pieces}) =
+        NormalC (mkName n) $ mapMaybe go' pieces ++ [(NotStrict, s)]
     go (n, Simple pieces _) = NormalC (mkName n) $ mapMaybe go' pieces
     go' (SinglePiece x) = Just (NotStrict, ConT $ mkName x)
     go' (MultiPiece x) = Just (NotStrict, ConT $ mkName x)
@@ -48,41 +48,46 @@ createParse res = do
                 then clauses
                 else clauses ++ [final']
   where
-    go (constr, SubSite{ssParse = p, ssPieces = pieces}) = do
-        let cons = ConP $ mkName ":"
+    cons x y = ConP (mkName ":") [x, y]
+    go (constr, SubSite{ssParse = p, ssPieces = ps}) = do
+        ri <- [|Right|]
+        be <- [|ape|]
+        (pat', parse) <- mkPat' be ps $ ri `AppE` ConE (mkName constr)
+        
         x <- newName "x"
-        let pat = foldr (\a b -> cons [LitP (StringL a), b]) (VarP x) pieces
+        let pat = init pat' ++ [VarP x]
+
+        --let pat = foldr (\a b -> cons [LitP (StringL a), b]) (VarP x) pieces
         let eitherSub = p `AppE` VarE x
-        fmape' <- [|fmape|]
-        let bod = fmape' `AppE` ConE (mkName constr) `AppE` eitherSub
-        return $ Clause [pat] (NormalB bod) []
+        let bod = be `AppE` parse `AppE` eitherSub
+        --let bod = fmape' `AppE` ConE (mkName constr) `AppE` eitherSub
+        return $ Clause [foldr1 cons pat] (NormalB bod) []
     go (n, Simple ps _) = do
         ri <- [|Right|]
         be <- [|ape|]
         (pat, parse) <- mkPat' be ps $ ri `AppE` ConE (mkName n)
-        return $ Clause [pat] (NormalB parse) []
+        return $ Clause [foldr1 cons pat] (NormalB parse) []
     final = do
         no <- [|Left "Invalid URL"|]
         return $ Clause [WildP] (NormalB no) []
-    mkPat' :: Exp -> [Piece] -> Exp -> Q (Pat, Exp)
+    mkPat' :: Exp -> [Piece] -> Exp -> Q ([Pat], Exp)
     mkPat' be [MultiPiece s] parse = do
         v <- newName $ "var" ++ s
         fmp <- [|fromMultiPiece|]
         let parse' = InfixE (Just parse) be $ Just $ fmp `AppE` VarE v
-        return (VarP v, parse')
+        return ([VarP v], parse')
     mkPat' _ (MultiPiece _:_) _parse = error "MultiPiece must be last"
     mkPat' be (StaticPiece s:rest) parse = do
         (x, parse') <- mkPat' be rest parse
-        let cons = ConP $ mkName ":"
-        return $ (cons [LitP $ StringL s, x], parse')
+        let sp = LitP $ StringL s
+        return (sp : x, parse')
     mkPat' be (SinglePiece s:rest) parse = do
         fsp <- [|fromSinglePiece|]
         v <- newName $ "var" ++ s
         let parse' = InfixE (Just parse) be $ Just $ fsp `AppE` VarE v
         (x, parse'') <- mkPat' be rest parse'
-        let cons = ConP $ mkName ":"
-        return (cons [VarP v, x], parse'')
-    mkPat' _ [] parse = return (ListP [], parse)
+        return (VarP v : x, parse'')
+    mkPat' _ [] parse = return ([ListP []], parse)
 
 fmape :: (a -> b) -> Either String a -> Either String b
 fmape _ (Left s) = Left s
@@ -105,13 +110,14 @@ createRender = mapM go
         bod <- mkBod ps'
         return $ Clause [pat] (NormalB $ TupE [bod, ListE []]) []
     go (n, SubSite{ssRender = r, ssPieces = pieces}) = do
-        cons' <- [|\a (b, c) -> (a : b, c)|]
+        cons' <- [|\a (b, c) -> (a ++ b, c)|]
         let cons a b = cons' `AppE` a `AppE` b
         x <- newName "x"
         let r' = r `AppE` VarE x
-        let pat = ConP (mkName n) [VarP x]
-        let bod = foldr (\a b -> cons (LitE $ StringL a) b) r' pieces
-        return $ Clause [pat] (NormalB bod) []
+        let pieces' = zip [1..] pieces
+        let pat = ConP (mkName n) $ mapMaybe go' pieces' ++ [VarP x]
+        bod <- mkBod pieces'
+        return $ Clause [pat] (NormalB $ cons bod r') []
     go' (_, StaticPiece _) = Nothing
     go' (i, _) = Just $ VarP $ mkName $ "var" ++ show (i :: Int)
     mkBod [] = lift ([] :: [String])
@@ -146,7 +152,7 @@ areResourcesComplete res =
             (MultiPiece _:rest) -> go' Left rest
             x -> go' Right x
     go (n, SubSite{ssPieces = ps}) =
-        go (n, Simple (map StaticPiece ps ++ [MultiPiece ""]) [])
+        go (n, Simple (ps ++ [MultiPiece ""]) [])
     go' b x = if all isSingle x then Just (b $ length x) else Nothing
     helper 0 _ = True
     helper _ [] = False
@@ -175,13 +181,16 @@ createDispatch modMaster toMaster = mapM go
                   ]
         bod <- go' n meth xs methods
         return $ Clause pat (NormalB bod) []
-    go (n, SubSite{ssDispatch = d, ssToMasterArg = tma}) = do
+    go (n, SubSite{ssDispatch = d, ssToMasterArg = tma, ssPieces = ps}) = do
         meth <- newName "method"
         x <- newName "x"
-        let pat = [ConP (mkName n) [VarP x], VarP meth]
+        xs <- mapM newName $ replicate (length $ filter notStatic ps) "x"
+        let pat = [ConP (mkName n) $ map VarP xs ++ [VarP x], VarP meth]
         let bod = d `AppE` VarE x `AppE` VarE meth
         fmap' <- [|fmap|]
-        let toMaster' = toMaster `AppE` ConE (mkName n) `AppE` tma `AppE` VarE x
+        let routeToMaster = foldl AppE (ConE (mkName n)) $ map VarE xs
+            tma' = foldl AppE tma $ map VarE xs
+        let toMaster' = toMaster `AppE` routeToMaster `AppE` tma' `AppE` VarE x
         let bod' = InfixE (Just toMaster') fmap' (Just bod)
         let bod'' = InfixE (Just modMaster) fmap' (Just bod')
         return $ Clause pat (NormalB bod'') []
