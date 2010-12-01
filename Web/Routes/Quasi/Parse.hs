@@ -11,7 +11,6 @@ module Web.Routes.Quasi.Parse
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
 import Data.Data
-import Data.Char
 import Data.Maybe
 
 -- | A quasi-quoter to parse a string into a list of 'Resource's. Checks for
@@ -93,10 +92,6 @@ resourcesFromString =
                  in Just $ Resource constr pieces rest
             [] -> Nothing
             _ -> error $ "Invalid resource line: " ++ s
-
--- | Drop leading whitespace.
-trim :: String -> String
-trim = dropWhile isSpace
 
 drop1Slash :: String -> String
 drop1Slash ('/':x) = x

@@ -89,10 +89,6 @@ createParse res = do
         return (VarP v : x, parse'')
     mkPat' _ [] parse = return ([ListP []], parse)
 
-fmape :: (a -> b) -> Either String a -> Either String b
-fmape _ (Left s) = Left s
-fmape f (Right a) = Right $ f a
-
 -- | 'ap' for 'Either'
 ape :: Either String (a -> b) -> Either String a -> Either String b
 ape (Left e) _ = Left e
