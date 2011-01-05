@@ -3,7 +3,9 @@
 module Web.Routes.Quasi.Parse
     ( -- * Quasi quoter
       parseRoutes
+    , parseRoutesFile
     , parseRoutesNoCheck
+    , parseRoutesFileNoCheck
     , Resource (..)
     , Piece (..)
     ) where
@@ -12,6 +14,7 @@ import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
 import Data.Data
 import Data.Maybe
+import qualified System.IO as SIO
 
 -- | A quasi-quoter to parse a string into a list of 'Resource's. Checks for
 -- overlapping routes, failing if present; use 'parseRoutesNoCheck' to skip the
@@ -28,6 +31,22 @@ parseRoutes = QuasiQuoter
             [] -> lift res
             z -> error $ "Overlapping routes: " ++ unlines (map show z)
     y = dataToPatQ (const Nothing) . resourcesFromString
+
+parseRoutesFile :: FilePath -> Q Exp
+parseRoutesFile fp = do
+    s <- qRunIO $ readUtf8File fp
+    quoteExp parseRoutes s
+
+parseRoutesFileNoCheck :: FilePath -> Q Exp
+parseRoutesFileNoCheck fp = do
+    s <- qRunIO $ readUtf8File fp
+    quoteExp parseRoutesNoCheck s
+
+readUtf8File :: FilePath -> IO String
+readUtf8File fp = do
+    h <- SIO.openFile fp SIO.ReadMode
+    SIO.hSetEncoding h SIO.utf8_bom
+    SIO.hGetContents h
 
 -- | Same as 'parseRoutes', but performs no overlap checking.
 parseRoutesNoCheck :: QuasiQuoter
