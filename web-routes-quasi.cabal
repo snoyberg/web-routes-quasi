@@ -5,7 +5,7 @@ license-file:    LICENSE
 author:          Michael Snoyman <michael@snoyman.com>
 maintainer:      Michael Snoyman <michael@snoyman.com>
 synopsis:        Define data types and parse/build functions for web-routes via a quasi-quoted DSL
-category:        Web
+category:        Web, Yesod
 stability:       unstable
 cabal-version:   >= 1.6
 build-type:      Simple
