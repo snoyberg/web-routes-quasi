@@ -26,6 +26,7 @@ data Pieces =
         , ssPieces :: [Piece]
         }
   | Simple [Piece] [String] -- ^ methods
+    deriving Show
 type THResource = (String, Pieces)
 
 createRoutes :: [THResource] -> Q [Con]
