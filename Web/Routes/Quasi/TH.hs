@@ -117,6 +117,7 @@ createRender = mapM go
         return $ Clause [pat] (NormalB $ cons bod r') []
     go' (_, StaticPiece _) = Nothing
     go' (i, _) = Just $ VarP $ mkName $ "var" ++ show (i :: Int)
+    mkBod :: (Show t) => [(t, Piece)] -> Q Exp
     mkBod [] = lift ([] :: [String])
     mkBod ((_, StaticPiece x):xs) = do
         x' <- lift x
@@ -170,6 +171,7 @@ createDispatch :: Exp -- ^ modify a master handler
                -> Q [Clause]
 createDispatch modMaster toMaster = mapM go
   where
+    go :: (String, Pieces) -> Q Clause
     go (n, Simple ps methods) = do
         meth <- newName "method"
         xs <- mapM newName $ replicate (length $ filter notStatic ps) "x"
