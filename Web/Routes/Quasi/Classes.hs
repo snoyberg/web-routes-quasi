@@ -14,13 +14,13 @@ class SinglePiece s where
     fromSinglePiece :: String -> Either String s
     toSinglePiece :: s -> String
 instance SinglePiece String where
-    fromSinglePiece = Right
+    fromSinglePiece s = if null s then Left "Empty string" else Right s
     toSinglePiece = id
 instance SinglePiece S.Text where
-    fromSinglePiece = Right . S.pack
+    fromSinglePiece s = if null s then Left "Empty string" else Right (S.pack s)
     toSinglePiece = S.unpack
 instance SinglePiece L.Text where
-    fromSinglePiece = Right . L.pack
+    fromSinglePiece s = if null s then Left "Empty string" else Right (L.pack s)
     toSinglePiece = L.unpack
 instance SinglePiece Integer where
     fromSinglePiece s = case reads s of
