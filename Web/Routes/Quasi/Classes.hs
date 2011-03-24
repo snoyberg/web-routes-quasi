@@ -9,45 +9,49 @@ module Web.Routes.Quasi.Classes
 import Data.Int (Int64)
 import qualified Data.Text as S
 import qualified Data.Text.Lazy as L
+import qualified Data.Text.Read
 
 class SinglePiece s where
-    fromSinglePiece :: String -> Either String s
-    toSinglePiece :: s -> String
+    fromSinglePiece :: S.Text -> Maybe s
+    toSinglePiece :: s -> S.Text
 instance SinglePiece String where
-    fromSinglePiece s = if null s then Left "Empty string" else Right s
-    toSinglePiece = id
+    fromSinglePiece s = if S.null s then Nothing else Just (S.unpack s)
+    toSinglePiece = S.pack
 instance SinglePiece S.Text where
-    fromSinglePiece s = if null s then Left "Empty string" else Right (S.pack s)
-    toSinglePiece = S.unpack
+    fromSinglePiece s = if S.null s then Nothing else Just s
+    toSinglePiece = id
 instance SinglePiece L.Text where
-    fromSinglePiece s = if null s then Left "Empty string" else Right (L.pack s)
-    toSinglePiece = L.unpack
+    fromSinglePiece s = if S.null s then Nothing else Just (L.fromChunks [s])
+    toSinglePiece = S.concat . L.toChunks
 instance SinglePiece Integer where
-    fromSinglePiece s = case reads s of
-                            (i, _):_ -> Right i
-                            _ -> Left $ "Invalid integer: " ++ s
-    toSinglePiece = show
+    fromSinglePiece s =
+        case Data.Text.Read.decimal s of
+            Right (i, _) -> Just i
+            Left _ -> Nothing
+    toSinglePiece = S.pack . show
 instance SinglePiece Int where
-    fromSinglePiece s = case reads s of
-                            (i, _):_ -> Right i
-                            _ -> Left $ "Invalid integer: " ++ s
-    toSinglePiece = show
+    fromSinglePiece s =
+        case Data.Text.Read.decimal s of
+            Right (i, _) -> Just i
+            Left _ -> Nothing
+    toSinglePiece = S.pack . show
 instance SinglePiece Int64 where
-    fromSinglePiece s = case reads s of
-                            (i, _):_ -> Right i
-                            _ -> Left $ "Invalid integer: " ++ s
-    toSinglePiece = show
+    fromSinglePiece s =
+        case Data.Text.Read.decimal s of
+            Right (i, _) -> Just i
+            Left _ -> Nothing
+    toSinglePiece = S.pack . show
 
 class MultiPiece s where
-    fromMultiPiece :: [String] -> Either String s
-    toMultiPiece :: s -> [String]
+    fromMultiPiece :: [S.Text] -> Maybe s
+    toMultiPiece :: s -> [S.Text]
 instance MultiPiece [String] where
-    fromMultiPiece = Right
-    toMultiPiece = id
+    fromMultiPiece = Just . map S.unpack
+    toMultiPiece = map S.pack
 type Strings = [String]
 instance MultiPiece [S.Text] where
-    fromMultiPiece = Right . map S.pack
-    toMultiPiece = map S.unpack
+    fromMultiPiece = Just
+    toMultiPiece = id
 instance MultiPiece [L.Text] where
-    fromMultiPiece = Right . map L.pack
-    toMultiPiece = map L.unpack
+    fromMultiPiece = Just . map (L.fromChunks . return)
+    toMultiPiece = map $ S.concat . L.toChunks
