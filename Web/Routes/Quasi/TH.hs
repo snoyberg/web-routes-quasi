@@ -15,6 +15,7 @@ import Data.Maybe
 import Data.Either
 import Data.List
 import Data.Char (toLower)
+import qualified Data.Text
 
 data Pieces =
     SubSite
@@ -121,8 +122,9 @@ createRender = mapM go
     mkBod [] = lift ([] :: [String])
     mkBod ((_, StaticPiece x):xs) = do
         x' <- lift x
+        pack <- [|Data.Text.pack|]
         xs' <- mkBod xs
-        return $ ConE (mkName ":") `AppE` x' `AppE` xs'
+        return $ ConE (mkName ":") `AppE` (pack `AppE` x') `AppE` xs'
     mkBod ((i, SinglePiece _):xs) = do
         let x' = VarE $ mkName $ "var" ++ show i
         tsp <- [|toSinglePiece|]
