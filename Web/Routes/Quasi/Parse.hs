@@ -10,6 +10,7 @@ module Web.Routes.Quasi.Parse
     , Piece (..)
     ) where
 
+import Language.Haskell.TH        (appE)
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
 import Data.Data
@@ -59,12 +60,8 @@ parseRoutesNoCheck = QuasiQuoter
     y = dataToPatQ (const Nothing) . resourcesFromString
 
 instance Lift Resource where
-    lift (Resource s ps h) = do
-        r <- [|Resource|]
-        s' <- lift s
-        ps' <- lift ps
-        h' <- lift h
-        return $ r `AppE` s' `AppE` ps' `AppE` h'
+    lift (Resource s ps h) =
+      [|Resource|] `appE` lift s `appE` lift ps `appE` lift h
 
 -- | A single resource pattern.
 --
@@ -84,18 +81,9 @@ data Piece = StaticPiece String
     deriving (Read, Show, Eq, Data, Typeable)
 
 instance Lift Piece where
-    lift (StaticPiece s) = do
-        c <- [|StaticPiece|]
-        s' <- lift s
-        return $ c `AppE` s'
-    lift (SinglePiece s) = do
-        c <- [|SinglePiece|]
-        s' <- lift s
-        return $ c `AppE` s'
-    lift (MultiPiece s) = do
-        c <- [|MultiPiece|]
-        s' <- lift s
-        return $ c `AppE` s'
+    lift (StaticPiece s) = [| StaticPiece |] `appE` lift s
+    lift (SinglePiece s) = [| SinglePiece |] `appE` lift s
+    lift (MultiPiece s)  = [| MultiPiece  |] `appE` lift s
 
 -- | Convert a multi-line string to a set of resources. See documentation for
 -- the format of this string. This is a partial function which calls 'error' on
