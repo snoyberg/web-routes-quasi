@@ -13,7 +13,7 @@ module Web.Routes.Quasi.Parse
 import Language.Haskell.TH        (appE)
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.Quote
-import Data.Data
+import Data.Data                  (Data,Typeable)
 import Data.Maybe
 import qualified System.IO as SIO
 
