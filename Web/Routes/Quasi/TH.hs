@@ -32,14 +32,17 @@ type THResource = (String, Pieces)
 
 createRoutes :: [THResource] -> Q [Con]
 createRoutes res =
-    return $ map go res
+    return $ map mkCon res
   where
-    go (n, SubSite{ssType = s, ssPieces = pieces}) =
-        NormalC (mkName n) $ mapMaybe go' pieces ++ [(NotStrict, s)]
-    go (n, Simple pieces _) = NormalC (mkName n) $ mapMaybe go' pieces
-    go' (SinglePiece x) = Just (NotStrict, ConT $ mkName x)
-    go' (MultiPiece x) = Just (NotStrict, ConT $ mkName x)
-    go' (StaticPiece _) = Nothing
+    -- Make constructor
+    mkCon (n, ss) = NormalC (mkName n) $
+      case ss of
+        SubSite{ssType = s, ssPieces = pieces} -> mapMaybe mkField pieces ++ [(NotStrict, s)]
+        Simple  pieces _                       -> mapMaybe mkField pieces
+    -- Make data fields in constructor
+    mkField (SinglePiece x) = Just (NotStrict, ConT $ mkName x)
+    mkField (MultiPiece  x) = Just (NotStrict, ConT $ mkName x)
+    mkField (StaticPiece _) = Nothing
 
 -- | Generates the set of clauses necesary to parse the given 'Resource's. See 'quasiParse'.
 createParse :: [THResource] -> Q [Clause]
