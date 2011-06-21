@@ -50,7 +50,7 @@ createParse res = do
                 then clauses
                 else clauses ++ [final']
   where
-    cons x y = ConP (mkName ":") [x, y]
+    cons x y = ConP '(:) [x, y]
     go (constr, SubSite{ssParse = p, ssPieces = ps}) = do
         ri <- [|Right|]
         be <- [|ape|]
@@ -124,13 +124,13 @@ createRender = mapM go
         x' <- lift x
         pack <- [|Data.Text.pack|]
         xs' <- mkBod xs
-        return $ ConE (mkName ":") `AppE` (pack `AppE` x') `AppE` xs'
+        return $ ConE '(:) `AppE` (pack `AppE` x') `AppE` xs'
     mkBod ((i, SinglePiece _):xs) = do
         let x' = VarE $ mkName $ "var" ++ show i
         tsp <- [|toSinglePiece|]
         let x'' = tsp `AppE` x'
         xs' <- mkBod xs
-        return $ ConE (mkName ":") `AppE` x'' `AppE` xs'
+        return $ ConE '(:) `AppE` x'' `AppE` xs'
     mkBod ((i, MultiPiece _):_) = do
         let x' = VarE $ mkName $ "var" ++ show i
         tmp <- [|toMultiPiece|]
