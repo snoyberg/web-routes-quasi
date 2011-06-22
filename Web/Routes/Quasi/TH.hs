@@ -32,14 +32,17 @@ type THResource = (String, Pieces)
 
 createRoutes :: [THResource] -> Q [Con]
 createRoutes res =
-    return $ map go res
+    return $ map mkCon res
   where
-    go (n, SubSite{ssType = s, ssPieces = pieces}) =
-        NormalC (mkName n) $ mapMaybe go' pieces ++ [(NotStrict, s)]
-    go (n, Simple pieces _) = NormalC (mkName n) $ mapMaybe go' pieces
-    go' (SinglePiece x) = Just (NotStrict, ConT $ mkName x)
-    go' (MultiPiece x) = Just (NotStrict, ConT $ mkName x)
-    go' (StaticPiece _) = Nothing
+    -- Make constructor
+    mkCon (n, ss) = NormalC (mkName n) $
+      case ss of
+        SubSite{ssType = s, ssPieces = pieces} -> mapMaybe mkField pieces ++ [(NotStrict, s)]
+        Simple  pieces _                       -> mapMaybe mkField pieces
+    -- Make data fields in constructor
+    mkField (SinglePiece x) = Just (NotStrict, ConT $ mkName x)
+    mkField (MultiPiece  x) = Just (NotStrict, ConT $ mkName x)
+    mkField (StaticPiece _) = Nothing
 
 -- | Generates the set of clauses necesary to parse the given 'Resource's. See 'quasiParse'.
 createParse :: [THResource] -> Q [Clause]
@@ -50,7 +53,7 @@ createParse res = do
                 then clauses
                 else clauses ++ [final']
   where
-    cons x y = ConP (mkName ":") [x, y]
+    cons x y = ConP '(:) [x, y]
     go (constr, SubSite{ssParse = p, ssPieces = ps}) = do
         ri <- [|Right|]
         be <- [|ape|]
@@ -124,13 +127,13 @@ createRender = mapM go
         x' <- lift x
         pack <- [|Data.Text.pack|]
         xs' <- mkBod xs
-        return $ ConE (mkName ":") `AppE` (pack `AppE` x') `AppE` xs'
+        return $ ConE '(:) `AppE` (pack `AppE` x') `AppE` xs'
     mkBod ((i, SinglePiece _):xs) = do
         let x' = VarE $ mkName $ "var" ++ show i
         tsp <- [|toSinglePiece|]
         let x'' = tsp `AppE` x'
         xs' <- mkBod xs
-        return $ ConE (mkName ":") `AppE` x'' `AppE` xs'
+        return $ ConE '(:) `AppE` x'' `AppE` xs'
     mkBod ((i, MultiPiece _):_) = do
         let x' = VarE $ mkName $ "var" ++ show i
         tmp <- [|toMultiPiece|]
