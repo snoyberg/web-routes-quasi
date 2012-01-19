@@ -1,10 +1,10 @@
 name:            web-routes-quasi
-version:         0.7.1
+version:         0.7.1.1
 license:         BSD3
 license-file:    LICENSE
 author:          Michael Snoyman <michael@snoyman.com>
 maintainer:      Michael Snoyman <michael@snoyman.com>
-synopsis:        Define data types and parse/build functions for web-routes via a quasi-quoted DSL
+synopsis:        Define data types and parse/build functions for web-routes via a quasi-quoted DSL (deprecated)
 category:        Web, Yesod
 stability:       unstable
 cabal-version:   >= 1.6
